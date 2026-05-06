@@ -1,0 +1,29 @@
+{
+  "roi_name": "ROI2",
+  "bbox_um": {
+    "x0_um": 640.0,
+    "x1_um": 1040.0,
+    "y0_um": 3370.0,
+    "y1_um": 3580.0
+  },
+  "pixel_size_um": 0.2125,
+  "pixel_bbox": {
+    "x0_px": 3012,
+    "x1_px": 4894,
+    "y0_px": 15859,
+    "y1_px": 16847
+  },
+  "shape_yx": [
+    988,
+    1882
+  ],
+  "channels": [
+    "DAPI",
+    "ATP1A1_CD45_ECad",
+    "18S",
+    "aSMA_Vim"
+  ],
+  "n_cells_in_mask": 469,
+  "n_cells_polygon_in_bbox": 428,
+  "n_transcripts_qv20": 265902
+}

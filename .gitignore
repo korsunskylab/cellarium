@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+.virtual_documents/
+*.nbconvert.ipynb
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.python-version
+.venv/
+venv/
+
+# Editors
+.vscode/
+.idea/
+
+# Full Xenium dataset is huge (~3 GB) — only the per-ROI snapshots under
+# data/Xenium_Prime_Human_Skin_FFPE_xe_outs/ROI*/ are tracked.
+data/Xenium_Prime_Human_Skin_FFPE_xe_outs/*
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/ROI*/
+
+# Prevent accidental commit of the user's other Xenium datasets if added later
+data/**/morphology_focus/
+data/**/*.zarr.zip
+data/**/*.xenium
+data/**/analysis_summary.html

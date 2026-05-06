@@ -1,0 +1,29 @@
+{
+  "roi_name": "ROI5",
+  "bbox_um": {
+    "x0_um": 6750.0,
+    "x1_um": 7000.0,
+    "y0_um": 3000.0,
+    "y1_um": 3250.0
+  },
+  "pixel_size_um": 0.2125,
+  "pixel_bbox": {
+    "x0_px": 31765,
+    "x1_px": 32941,
+    "y0_px": 14118,
+    "y1_px": 15294
+  },
+  "shape_yx": [
+    1176,
+    1176
+  ],
+  "channels": [
+    "DAPI",
+    "ATP1A1_CD45_ECad",
+    "18S",
+    "aSMA_Vim"
+  ],
+  "n_cells_in_mask": 412,
+  "n_cells_polygon_in_bbox": 384,
+  "n_transcripts_qv20": 136419
+}
