@@ -166,7 +166,10 @@ print(f"  pixels above thr=-1.0: {(cellprob > -1).mean()*100:.1f}%")
 print(f"  pixels above thr=-2.0: {(cellprob > -2).mean()*100:.1f}%")
 
 # 2x2 grid: composite, cellprob, flow direction (HSV), flow magnitude
-fig, ax = plt.subplots(2, 2, figsize=(14, 10))
+H_im, W_im = composite.shape[:2]
+panel_w = 7.0
+panel_h = panel_w * (H_im / W_im)
+fig, ax = plt.subplots(2, 2, figsize=(panel_w * 2 + 0.6, panel_h * 2 + 0.4))
 ax[0, 0].imshow(composite, aspect="equal", extent=extent)
 ax[0, 0].set_title("DAPI (blue) + 18S (yellow)"); ax[0, 0].axis("off")
 
@@ -445,7 +448,10 @@ def transcripts_inside(masks):
     inside[inb] = masks[py[inb], px[inb]] > 0
     return inside
 
-fig, ax = plt.subplots(2, 2, figsize=(15, 9))
+H_im, W_im = composite.shape[:2]
+panel_w = 7.5
+panel_h = panel_w * (H_im / W_im)
+fig, ax = plt.subplots(2, 2, figsize=(panel_w * 2 + 0.5, panel_h * 2 + 0.4))
 for j, (title, masks, seed) in enumerate(panels):
     ax[0, j].imshow(composite,                       aspect="equal", extent=extent)
     ax[0, j].imshow(label_overlay(masks, seed=seed), aspect="equal", extent=extent)
@@ -504,10 +510,13 @@ for ft, m in flow_results.items():
 """))
 
 cells.append(nbf.v4.new_code_cell("""# Helper: 2-row sweep plot — top row masks, bottom row transcripts (gray=inside, red=outside)
-def plot_sweep_2row(configs, seed_offset=30, fig_h_per_col=5.0):
-    \"\"\"configs: list of (title, masks). Renders a (2 × len(configs)) grid.\"\"\"
+def plot_sweep_2row(configs, seed_offset=30, panel_w=6.0):
+    \"\"\"configs: list of (title, masks). Renders a (2 × len(configs)) grid.
+    Panel height is derived from the ROI's actual aspect to avoid whitespace.\"\"\"
     n = len(configs)
-    fig, ax = plt.subplots(2, n, figsize=(5*n, fig_h_per_col*2 + 0.5), squeeze=False)
+    H_im, W_im = composite.shape[:2]
+    panel_h = panel_w * (H_im / W_im)
+    fig, ax = plt.subplots(2, n, figsize=(panel_w * n, panel_h * 2 + 0.6), squeeze=False)
     for k, (title, masks) in enumerate(configs):
         ax[0, k].imshow(composite,                              aspect="equal", extent=extent)
         ax[0, k].imshow(label_overlay(masks, seed=seed_offset+k), aspect="equal", extent=extent)
