@@ -19,13 +19,24 @@ venv/
 .vscode/
 .idea/
 
-# Full Xenium dataset is huge (~3 GB) — only the per-ROI snapshots under
-# data/Xenium_Prime_Human_Skin_FFPE_xe_outs/ROI*/ are tracked.
+# Full Xenium source files (~3 GB) — only per-ROI crops are tracked.
 data/Xenium_Prime_Human_Skin_FFPE_xe_outs/*
 !data/Xenium_Prime_Human_Skin_FFPE_xe_outs/ROI*/
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/README.md
 
-# Prevent accidental commit of the user's other Xenium datasets if added later
+# Generic exclusions for any other Xenium dataset that might land here
 data/**/morphology_focus/
 data/**/*.zarr.zip
 data/**/*.xenium
 data/**/analysis_summary.html
+
+# Derived outputs from the workflow notebooks — all regenerable
+data/**/cells_extracted/
+data/**/celltype_analysis*/
+data/**/gene_celltype_*.parquet
+data/**/gene_labels_*.parquet
+data/**/ROI*/boundary_prior/
+data/**/ROI*/cpsam_roundtrip/
+
+# Keep data/README.md tracked
+!data/README.md

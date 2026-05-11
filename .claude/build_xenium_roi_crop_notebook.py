@@ -708,7 +708,7 @@ for name, masks in pipeline_runs.items():
 
 nb.cells = cells
 
-out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/notebooks/xenium_roi_crop_cpsam.ipynb")
+out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/tools/xenium_roi_crop_cpsam.ipynb")
 out.parent.mkdir(parents=True, exist_ok=True)
 nbf.write(nb, str(out))
 print("wrote:", out)

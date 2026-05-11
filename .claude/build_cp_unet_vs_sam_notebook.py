@@ -198,7 +198,7 @@ This notebook isolates the *architecture* effect (UNet vs SAM-derived backbone) 
 
 nb.cells = cells
 
-out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/notebooks/cp_unet_vs_sam.ipynb")
+out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/sandbox/cp_unet_vs_sam.ipynb")
 out.parent.mkdir(parents=True, exist_ok=True)
 nbf.write(nb, str(out))
 print("wrote:", out)

@@ -1,4 +1,4 @@
-"""Builder for notebooks/gap_intervention_test.ipynb.
+"""Builder for workflow/04_gap_intervention_test.ipynb.
 
 Step 0 of the boundary-prior initiative — validates the gap-cut intervention
 on the 18S channel before the upstream gradient pipeline is built.
@@ -142,6 +142,46 @@ def apply_gaussian_strip_along_line(s18, p1, p2, sigma_px, intensity_factor):
     uy, ux = dy / L, dx / L
     along = (yy - cy) * uy + (xx - cx) * ux
     profile = 1.0 - (1.0 - intensity_factor) * np.exp(-(along ** 2) / (2.0 * sigma_px ** 2))
+    return s18 * profile
+
+
+def apply_gaussian_dim_noisy(s18, x_center, sigma_px, intensity_factor, noise_std, seed=0):
+    \"\"\"Phase A: Gaussian dim along vertical strip at x_center, with f varying row-by-row.
+    Each row gets f_row = clip(intensity_factor + ε, 0, 1), ε ~ N(0, noise_std²).
+    Simulates non-uniform mRNA-gradient confidence along the boundary.\"\"\"
+    if sigma_px <= 0: return s18.copy()
+    H, W = s18.shape
+    rng = np.random.default_rng(seed)
+    eps_per_row = rng.standard_normal(H) * noise_std
+    f_per_row   = np.clip(intensity_factor + eps_per_row, 0, 1)
+    xx = np.arange(W)
+    gauss = np.exp(-((xx - x_center) ** 2) / (2.0 * sigma_px ** 2))[None, :]   # (1, W)
+    profile = 1.0 - (1.0 - f_per_row[:, None]) * gauss
+    return s18 * profile
+
+
+def apply_gaussian_strip_along_line_noisy(s18, p1, p2, sigma_px, intensity_factor, noise_std, seed=0):
+    \"\"\"Phase B: Gaussian dim perpendicular to p1->p2, with f varying along the cut tangent
+    (perpendicular to the p1->p2 axis). One noise sample per 1-px bin along the tangent.\"\"\"
+    if sigma_px <= 0: return s18.copy()
+    H, W = s18.shape
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:H, 0:W]
+    cy = 0.5 * (p1[0] + p2[0]); cx = 0.5 * (p1[1] + p2[1])
+    dy, dx = p2[0] - p1[0], p2[1] - p1[1]
+    L = np.hypot(dy, dx)
+    if L < 1e-6: return s18.copy()
+    uy, ux = dy / L, dx / L
+    along_axis = (yy - cy) * uy + (xx - cx) * ux                  # Gaussian falloff direction
+    tang_uy, tang_ux = -ux, uy                                    # rotate 90° → along the cut line
+    along_tang = (yy - cy) * tang_uy + (xx - cx) * tang_ux
+    # 1-px bins along the tangent — one noise sample per bin
+    bin_idx = np.floor(along_tang).astype(int)
+    bin_idx -= bin_idx.min()
+    n_bins = int(bin_idx.max()) + 1
+    eps = rng.standard_normal(n_bins) * noise_std
+    f_per_pixel = np.clip(intensity_factor + eps[bin_idx], 0, 1)
+    profile = 1.0 - (1.0 - f_per_pixel) * np.exp(-(along_axis ** 2) / (2.0 * sigma_px ** 2))
     return s18 * profile
 
 
@@ -391,6 +431,51 @@ plt.suptitle(f"Phase A — angle sweep (σ={SIGMA_A:g}, f={FACTOR_A:g})  "
              f"— top: 18S after cut + cut band (cyan); bottom: cpsam masks",
              fontsize=11, y=1.005)
 plt.tight_layout(); plt.show()
+"""))
+
+# ── 1g. Noise tolerance ──────────────────────────────────────────────────
+cells.append(md("""### 1g. Noise tolerance — what if f varies along the cut?
+
+In the upstream pipeline (notebooks 1–2 in R), we won't know f perfectly — the mRNA gradient confidence will vary along the boundary, so f should vary pixel-to-pixel along the cut. This section sweeps `noise_std` to find how much per-row variability cpsam tolerates before splits stop firing.
+
+Setup: at each row, draw `f_row = clip(f_mean + ε, 0, 1)` with ε ~ N(0, noise_std²). Sweep noise_std at a fixed (σ, f_mean) point that gave a clean split in 1c. Top row shows the noisy 18S profile; bottom row shows the cpsam masks."""))
+
+cells.append(code("""SIGMA_NOISE_A   = 2.0     # narrow cut (operating regime: deep + narrow → clean split)
+F_MEAN_NOISE_A  = 0.0     # deep
+NOISE_LEVELS_A  = [0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5]
+NOISE_SEED      = 0
+
+results_noise_A = []
+for ns in NOISE_LEVELS_A:
+    s18_cut = apply_gaussian_dim_noisy(s18, x_center, SIGMA_NOISE_A, F_MEAN_NOISE_A,
+                                        ns, seed=NOISE_SEED)
+    masks, n = run_cpsam(s18_cut)
+    results_noise_A.append((ns, s18_cut, masks, n))
+
+fig, ax = plt.subplots(2, len(NOISE_LEVELS_A),
+                       figsize=(2.0*len(NOISE_LEVELS_A), 4.0), squeeze=False)
+for j, (ns, s18_cut, masks, n) in enumerate(results_noise_A):
+    ax[0, j].imshow(s18_cut, cmap="gray", vmin=0, vmax=1, interpolation="nearest")
+    ax[0, j].set_title(f"noise_std = {ns:g}", fontsize=9)
+    ax[0, j].set_xticks([]); ax[0, j].set_yticks([])
+    ax[1, j].imshow(s18_cut, cmap="gray", vmin=0, vmax=1, interpolation="nearest")
+    ax[1, j].imshow(label_overlay(masks, seed=500 + j), interpolation="nearest")
+    ax[1, j].set_title(f"n = {n}", fontsize=10, backgroundcolor=outcome_color(n))
+    ax[1, j].set_xticks([]); ax[1, j].set_yticks([])
+plt.suptitle(f"Phase A — noise robustness (σ={SIGMA_NOISE_A:g}, f_mean={F_MEAN_NOISE_A:g}; "
+             f"top: 18S; bottom: cpsam masks)",
+             fontsize=11, y=1.005)
+plt.tight_layout(); plt.show()
+
+# Print breakdown threshold
+print("\\nNoise vs cpsam outcome:")
+last_clean = None
+for ns, _, _, n in results_noise_A:
+    flag = "split ✓" if n == 2 else ("merged" if n < 2 else f"n={n}")
+    if n == 2: last_clean = ns
+    print(f"  noise_std={ns:>4.2f}  →  n={n}  ({flag})")
+if last_clean is not None:
+    print(f"\\n  highest noise_std with clean split: {last_clean:.2f}")
 """))
 
 # ── 2. Phase B ────────────────────────────────────────────────────────────
@@ -686,24 +771,62 @@ cells.append(md("""### 2e. Sweep on the real doublet (cut at 10X midpoint, no cl
 
 `(σ × factor)` sweep with the Gaussian cut centered at the midpoint of the two 10X centroids, perpendicular to the c1→c2 line. No clipping — the dim band can extend into neighboring cells. The most aggressive setting (σ=24, f=0) sets the multiplier to 0 at the midpoint and produces a wide dim band reaching ~50 px on either side. Success criterion: the two 10X centroids land in *different* cpsam mask labels."""))
 
-cells.append(code("""def correct_split_check(masks, p1, p2):
-    \"\"\"True iff the two centroids are inside different non-zero cpsam labels.\"\"\"
+cells.append(code("""def split_quality(masks, p1, p2, mask_M):
+    \"\"\"Did the cut cleanly split the original merged cpsam region (mask_M) into two
+    cells corresponding to centroids p1, p2?  Returns a dict of metrics.
+
+    Three things have to be true for a clean split:
+      1. p1 and p2 must be in DIFFERENT non-zero cpsam labels (call them L1, L2).
+      2. PER-SIDE COVERAGE: Voronoi-partition mask_M by closest centroid; each side
+         must be ≥ MIN_COVERAGE covered by its centroid's label.
+      3. BULK COVERAGE: L1+L2 together must claim ≥ MIN_BULK of the original merged
+         region. If bulk is low, the merged cell got fragmented across many labels
+         (only two of which happen to contain the centroids) — that's not a real
+         2-way split, that's fragmentation that happens to put the centroids in
+         different fragments. Catches the noise=0.5 / n=4 failure mode where the
+         cell is effectively "not split" even though counts and centroids look ok.
+    \"\"\"
+    MIN_COVERAGE = 0.6
+    MIN_BULK     = 0.7
     n = int(masks.max())
+    H_, W_ = masks.shape
     y1_, x1_ = int(round(p1[0])), int(round(p1[1]))
     y2_, x2_ = int(round(p2[0])), int(round(p2[1]))
-    H_, W_ = masks.shape
-    if not (0 <= y1_ < H_ and 0 <= x1_ < W_ and 0 <= y2_ < H_ and 0 <= x2_ < W_):
-        return n, False
-    L1, L2 = int(masks[y1_, x1_]), int(masks[y2_, x2_])
-    return n, (L1 != 0 and L2 != 0 and L1 != L2)
+    in_bounds = (0 <= y1_ < H_ and 0 <= x1_ < W_ and 0 <= y2_ < H_ and 0 <= x2_ < W_)
+    L1 = int(masks[y1_, x1_]) if in_bounds else 0
+    L2 = int(masks[y2_, x2_]) if in_bounds else 0
+    different = (L1 != 0 and L2 != 0 and L1 != L2)
+
+    yy, xx = np.mgrid[0:H_, 0:W_]
+    d1 = (yy - p1[0]) ** 2 + (xx - p1[1]) ** 2
+    d2 = (yy - p2[0]) ** 2 + (xx - p2[1]) ** 2
+    side1 = mask_M & (d1 <= d2)
+    side2 = mask_M & (d2 <  d1)
+
+    cov1 = float((side1 & (masks == L1)).sum()) / max(float(side1.sum()), 1) if L1 != 0 else 0.0
+    cov2 = float((side2 & (masks == L2)).sum()) / max(float(side2.sum()), 1) if L2 != 0 else 0.0
+
+    if L1 != 0 and L2 != 0:
+        bulk = float((((masks == L1) | (masks == L2)) & mask_M).sum()) / max(float(mask_M.sum()), 1)
+    else:
+        bulk = 0.0
+
+    clean = (different and
+             cov1 >= MIN_COVERAGE and cov2 >= MIN_COVERAGE and
+             bulk >= MIN_BULK)
+    return dict(n=n, L1=L1, L2=L2, different=different,
+                cov1=cov1, cov2=cov2, bulk=bulk, clean=clean)
 
 
 sigmas_b   = [0, 2, 4, 6, 8, 12, 16, 20, 24]   # extended for real-cell scale (σ in pixels at 0.21 µm/px)
 factors_b  = [1.0, 0.7, 0.5, 0.3, 0.1, 0.0]    # f=0 → multiplier of 0 at the boundary peak (full erase)
 
-n_grid_b   = np.zeros((len(factors_b), len(sigmas_b)), dtype=np.int32)
-ok_grid_b  = np.zeros_like(n_grid_b, dtype=bool)
-runs_b     = {}
+n_grid_b    = np.zeros((len(factors_b), len(sigmas_b)), dtype=np.int32)
+ok_grid_b   = np.zeros_like(n_grid_b, dtype=bool)
+cov1_grid_b = np.zeros((len(factors_b), len(sigmas_b)), dtype=np.float32)
+cov2_grid_b = np.zeros_like(cov1_grid_b)
+bulk_grid_b = np.zeros_like(cov1_grid_b)
+runs_b      = {}
 
 t0 = time.time()
 for i, f in enumerate(factors_b):
@@ -711,9 +834,12 @@ for i, f in enumerate(factors_b):
         s18_cut = apply_gaussian_strip_along_line(s18_c, c1_c, c2_c, sg, f)
         img = np.stack([dapi_c, s18_cut], axis=-1)
         masks, _ = run_cpsam(img)
-        n, ok = correct_split_check(masks, c1_c, c2_c)
-        n_grid_b[i, j] = n
-        ok_grid_b[i, j] = ok
+        q = split_quality(masks, c1_c, c2_c, mask_M_c)
+        n_grid_b[i, j]    = q["n"]
+        ok_grid_b[i, j]   = q["clean"]
+        cov1_grid_b[i, j] = q["cov1"]
+        cov2_grid_b[i, j] = q["cov2"]
+        bulk_grid_b[i, j] = q["bulk"]
         runs_b[(i, j)] = masks
 print(f"Phase-B sweep done in {time.time()-t0:.1f}s   ({len(sigmas_b)*len(factors_b)} cpsam runs)")
 """))
@@ -791,15 +917,88 @@ for i, f in enumerate(factors_b):
         ax[i, j].plot([c1_c[1]], [c1_c[0]], "o", color="white", ms=4, mec="black")
         ax[i, j].plot([c2_c[1]], [c2_c[0]], "o", color="white", ms=4, mec="black")
 
+        cov1, cov2 = cov1_grid_b[i, j], cov2_grid_b[i, j]
         if ok:                bg = "#bce8b3"
         elif n > 2:           bg = "#f6e7a3"
         else:                 bg = "#f4b6b2"
-        ax[i, j].set_title(f"f={f:.1f}  σ={sg:g}\\nn={n}  {'✓' if ok else '✗'}",
-                           fontsize=8, backgroundcolor=bg)
+        ax[i, j].set_title(f"f={f:.1f}  σ={sg:g}\\nn={n}  cov={cov1*100:.0f}/{cov2*100:.0f}%  {'✓' if ok else '✗'}",
+                           fontsize=7.5, backgroundcolor=bg)
         ax[i, j].set_xticks([]); ax[i, j].set_yticks([])
 plt.suptitle("Phase B — composite + cpsam masks  (rows: factor, cols: σ)",
              fontsize=11, y=1.005)
 plt.tight_layout(); plt.show()
+"""))
+
+# ── 2h. Phase B noise tolerance ─────────────────────────────────────────
+cells.append(md("""### 2h. Phase B noise tolerance
+
+Same logic as 1g, on the real doublet. Auto-pick the most-aggressive *correct* (σ, f_mean) from 2e (smallest σ wins ties — matches the operating-regime preference for narrow cuts), then sweep `noise_std`. f varies along the cut tangent (perpendicular to the c1→c2 axis). Top row: composite (DAPI blue + noisy-cut 18S yellow); bottom row: cpsam masks.
+
+**Evaluation:** counting cells is insufficient — at high noise, fragmentation can put p1 and p2 in different labels even when the actual cleavage between the two cells didn't happen (e.g. n=4 fragments that don't correspond to the original two cells). The richer `split_quality` metric Voronoi-partitions the original merged region by closest 10X centroid and reports per-side coverage. **clean ✓ requires both sides ≥50% covered by their centroid's label**, not just "different labels". Also reports `bulk` = fraction of the original merged region claimed by L1+L2 together (drops when fragmentation steals pixels)."""))
+
+cells.append(code("""# Auto-pick (σ, f_mean) from the correct-split cells in the earlier sweep
+correct_cells = [(i, j) for i in range(len(factors_b)) for j in range(len(sigmas_b))
+                 if ok_grid_b[i, j] and sigmas_b[j] > 0]
+if correct_cells:
+    pick = min(correct_cells, key=lambda ij: (sigmas_b[ij[1]], factors_b[ij[0]]))
+    SIG_NOISE_B, F_MEAN_NOISE_B = sigmas_b[pick[1]], factors_b[pick[0]]
+    print(f"using (σ={SIG_NOISE_B:g}, f_mean={F_MEAN_NOISE_B:g}) — auto-picked from 2e correct splits")
+else:
+    SIG_NOISE_B, F_MEAN_NOISE_B = 4.0, 0.0
+    print(f"no correct splits in 2e — fallback to (σ={SIG_NOISE_B:g}, f_mean={F_MEAN_NOISE_B:g})")
+
+NOISE_LEVELS_B = [0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5]
+
+results_noise_B = []
+for ns in NOISE_LEVELS_B:
+    s18_cut = apply_gaussian_strip_along_line_noisy(s18_c, c1_c, c2_c,
+                                                     SIG_NOISE_B, F_MEAN_NOISE_B,
+                                                     ns, seed=0)
+    img = np.stack([dapi_c, s18_cut], axis=-1)
+    masks, _ = run_cpsam(img)
+    q = split_quality(masks, c1_c, c2_c, mask_M_c)
+    results_noise_B.append((ns, s18_cut, masks, q))
+
+fig, ax = plt.subplots(2, len(NOISE_LEVELS_B),
+                       figsize=(2.0*len(NOISE_LEVELS_B), 4.0), squeeze=False)
+for j, (ns, s18_cut, masks, q) in enumerate(results_noise_B):
+    ax[0, j].imshow(blue_yellow_composite(dapi_c, s18_cut), interpolation="nearest")
+    ax[0, j].set_title(f"noise_std = {ns:g}", fontsize=9)
+    ax[0, j].set_xticks([]); ax[0, j].set_yticks([])
+    ax[1, j].imshow(blue_yellow_composite(dapi_c, s18_cut), interpolation="nearest")
+    ax[1, j].imshow(label_overlay(masks, seed=600 + j, alpha_fill=0.25), interpolation="nearest")
+    ax[1, j].plot([c1_c[1], c2_c[1]], [c1_c[0], c2_c[0]], "-", color="white", lw=0.7)
+    ax[1, j].plot([c1_c[1]], [c1_c[0]], "o", color="white", ms=4, mec="black")
+    ax[1, j].plot([c2_c[1]], [c2_c[0]], "o", color="white", ms=4, mec="black")
+    bg = "#bce8b3" if q["clean"] else ("#f6e7a3" if q["n"] > 2 else "#f4b6b2")
+    ax[1, j].set_title(f"n={q['n']}  cov={q['cov1']*100:.0f}/{q['cov2']*100:.0f}%\\nbulk={q['bulk']*100:.0f}%  {'✓' if q['clean'] else '✗'}",
+                        fontsize=8, backgroundcolor=bg)
+    ax[1, j].set_xticks([]); ax[1, j].set_yticks([])
+plt.suptitle(f"Phase B — noise robustness (σ={SIG_NOISE_B:g}, f_mean={F_MEAN_NOISE_B:g}); "
+             f"cov = per-side coverage, bulk = % of original merged region claimed by L1+L2",
+             fontsize=10, y=1.005)
+plt.tight_layout(); plt.show()
+
+print("\\nNoise vs cpsam outcome on the real doublet:")
+print(f"  {'noise_std':>9s} {'n_cells':>7s} {'cov1':>6s} {'cov2':>6s} {'bulk':>6s}  verdict")
+last_clean = None
+for ns, _, _, q in results_noise_B:
+    if q["clean"]:
+        verdict = "✓ clean split"; last_clean = ns
+    elif not q["different"]:
+        if q["L1"] == q["L2"] and q["L1"] != 0:
+            verdict = "✗ both centroids in same label (still merged)"
+        else:
+            verdict = "✗ centroid in background"
+    elif q["bulk"] < 0.7:
+        verdict = f"✗ fragmented — L1+L2 only cover {q['bulk']*100:.0f}% of the original merged cell"
+    elif q["cov1"] < 0.6 or q["cov2"] < 0.6:
+        verdict = f"✗ different labels but per-side coverage too low ({q['cov1']*100:.0f}/{q['cov2']*100:.0f}%)"
+    else:
+        verdict = "✗ unclassified failure"
+    print(f"  {ns:>9.2f} {q['n']:>7d} {q['cov1']*100:>5.0f}% {q['cov2']*100:>5.0f}% {q['bulk']*100:>5.0f}%  {verdict}")
+if last_clean is not None:
+    print(f"\\n  highest noise_std with clean split: {last_clean:.2f}")
 """))
 
 # ── 3. Findings + design implications ───────────────────────────────────
@@ -832,7 +1031,7 @@ cells.append(md("""## 3. Findings + design implications for notebooks 1–3
 # ─── Write notebook ───────────────────────────────────────────────────────
 nb.cells = cells
 
-out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/notebooks/gap_intervention_test.ipynb")
+out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/workflow/04_gap_intervention_test.ipynb")
 out.parent.mkdir(parents=True, exist_ok=True)
 nbf.write(nb, str(out))
 print("wrote:", out)

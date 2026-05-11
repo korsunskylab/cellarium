@@ -259,7 +259,7 @@ print(f"\\n  totals across slide: 10X assigned {sum(r['tx%_10X']*r['n_tx']/100 f
 """))
 
 nb.cells = cells
-out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/notebooks/multi_roi_comparison.ipynb")
+out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/tools/multi_roi_comparison.ipynb")
 out.parent.mkdir(parents=True, exist_ok=True)
 nbf.write(nb, str(out))
 print("wrote:", out)

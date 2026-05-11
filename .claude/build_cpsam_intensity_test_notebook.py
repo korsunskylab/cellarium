@@ -212,7 +212,7 @@ cells.append(nbf.v4.new_markdown_cell("""## 6. Interpretation
 
 nb.cells = cells
 
-out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/notebooks/cpsam_intensity_split_test.ipynb")
+out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/sandbox/cpsam_intensity_split_test.ipynb")
 out.parent.mkdir(parents=True, exist_ok=True)
 nbf.write(nb, str(out))
 print("wrote:", out)

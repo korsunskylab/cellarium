@@ -1,35 +1,34 @@
 # cellarium
 
-Cell-segmentation and transcript-assignment experiments on Xenium spatial transcriptomics data, focused on improving over 10X's default segmentation by re-running cellpose 4 (`cpsam`) with permissive thresholds.
+Improving cell segmentation on Xenium spatial transcriptomics by augmenting the morphology image with a transcript-derived **boundary-likelihood prior** before running CP-SAM (cellpose 4). The hypothesis: where mRNA gradients indicate a cell-type transition, dim the 18S morphology channel along that line so CP-SAM is more likely to split heterotypic neighbors that would otherwise be merged.
 
-## What's here
+The repo is organized into three tiers of notebooks plus supporting scripts:
 
-- `scripts/` — Python builders that generate the notebooks below from source. Re-run any builder if you want to regenerate a notebook.
-- `notebooks/` — executed Jupyter notebooks with embedded plots:
-  - `omnipose_install_check.ipynb` — synthetic-data sanity check that the env runs cellpose 4 + omnipose side-by-side on Apple Silicon (MPS).
-  - `cp_unet_vs_sam.ipynb` — architecture comparison: legacy cyto2 U-Net vs cpsam (SAM backbone), same post-processing, same synthetic data.
-  - `cpsam_intensity_split_test.ipynb` — small experiment probing whether cpsam uses intensity contrast or shape cues to split touching cells.
-  - `xenium_roi_crop_cpsam.ipynb` — the main per-ROI workspace. Toggle `ROI = "ROI1"` … `"ROI6"` at the top to switch. Compares 10X cell calls vs cpsam at varied threshold settings; visualises cellprob, flow direction, flow magnitude (incl. interactive plotly); plots cprob vs mRNA density to inform threshold choice.
-  - `multi_roi_comparison.ipynb` — runs cpsam MAX RECALL on all 6 ROIs and compares to 10X with a slide-level overview, top-10 gene tables, and side-by-side mask + transcript-assignment grids.
-- `figs/` — survey outputs (slide-level cell density, candidate-ROI mini-views).
-- `data/Xenium_Prime_Human_Skin_FFPE_xe_outs/ROI{1..6}/` — six pre-cropped ROIs from the Human Skin Melanoma FFPE 5K slide. Each contains the 4 morphology channels (`DAPI`, `ATP1A1_CD45_ECad`, `18S`, `aSMA_Vim`) as TIFFs, the 10X cell mask, 10X cell polygons (parquet), filtered transcripts (parquet, qv≥20), and metadata.
-
-The full source dataset is *not* tracked (~3 GB). The crop scripts are kept in `scripts/` so the ROIs can be regenerated from source if needed.
-
-## Environment
-
-Python 3.11 conda env with `cellpose==4.1.1`, `cellpose-omni==0.9.1`, `omnipose==0.4.4`. `torch==2.11`, MPS-enabled (Apple Silicon GPU).
-
-```bash
-mamba create -n omnipose python=3.11 pip -y
-mamba activate omnipose
-pip install cellpose==4.1.1 omnipose==0.4.4 jupyterlab tifffile zarr pandas pyarrow pooch plotly anywidget
-python -m ipykernel install --user --name omnipose --display-name "Python (omnipose)"
+```
+cellarium/
+├── workflow/   # canonical pipeline — run these in order to reproduce results
+├── tools/      # parameterized utilities for exploring a new dataset
+├── sandbox/    # archived one-off experiments that informed pipeline decisions
+├── scripts/    # preprocessing + runtime helpers invoked by the notebooks
+├── .claude/    # nbformat builders for the notebooks (Claude scaffolding; not user-facing)
+├── data/       # Xenium output + per-ROI crops + derived outputs (mostly gitignored)
+└── figs/       # standalone diagnostic figures
 ```
 
-## Recommended cpsam settings
+Each subfolder has its own README. Start with `workflow/README.md` to reproduce the pipeline; `tools/README.md` to explore a new dataset; `sandbox/README.md` to understand why we made specific design decisions.
 
-For Xenium 5K tissue work in this pipeline, MAX RECALL config gives ~93% transcript-to-cell assignment vs ~75% for 10X defaults across the 6 ROIs:
+## Top-level pipeline narrative
+
+1. **`workflow/01_celltype_ground_truth.ipynb`** (R) — Ingest the full 10X-segmented cells (~112k), QC, cluster via Seurat + Harmony, annotate clusters into 15 fine + 7 lineage cell-type labels, build a gene × cell-type count matrix, and emit per-gene lineage labels (one of the 7 types or "ambiguous").
+2. **`workflow/02_label_smoothing_methods.ipynb`** (R) — Synthetic test bed comparing naive K-NN pooling vs anchored label propagation vs Potts-model Gibbs sampling at varying anchor densities. Outcome: label propagation wins at the realistic anchor density (~14% of genes are single-type-specific in this Xenium panel).
+3. **`workflow/03_mrna_gradients.ipynb`** (R) — Per-transcript embedding from the count matrix in (1), filtered by labels, processed via Tessera (mesh + gradient + smoothing) to produce a per-transcript boundary score. Exports `boundary_likelihood.tif` at morphology resolution for the Python pipeline.
+4. **`workflow/04_gap_intervention_test.ipynb`** (Python) — Step-0 validation that a Gaussian dim cut on 18S forces CP-SAM to split a merged doublet. Operating window mapped on synthetic + real ROI data.
+
+The integration step (apply boundary mask from notebook 03 to the 18S channel + re-run CP-SAM) is set up at the end of notebook 03 (`§7 cpsam_roundtrip`).
+
+## Recommended CP-SAM settings
+
+For Xenium 5K tissue work in this pipeline, the validated **max-recall** config gives ~93% transcript-to-cell assignment vs ~75% for 10X defaults across 6 ROIs of the Human Skin Melanoma slide:
 
 ```python
 from cellpose import models
@@ -39,12 +38,25 @@ img_2ch = np.stack([dapi, s18], axis=-1)  # DAPI + 18S, percentile-normalised
 masks, flows, _ = m.eval(
     img_2ch, channel_axis=-1, diameter=None,
     cellprob_threshold=-5.0,   # very permissive; saturates at -4
-    flow_threshold=0.0,        # disable flow-coherence filter (otherwise it cancels cellprob)
+    flow_threshold=0.0,        # disable flow-coherence filter
     augment=True,
 )
 ```
 
-Bias toward over-segmentation: false positives are filterable downstream by Baysor's transcript voting, false negatives are not.
+The bias is intentional toward over-segmentation: false positives are filterable downstream by Baysor's transcript voting, false negatives are not.
+
+## Environment
+
+Python (cpsam, cellpose-omni, omnipose) — used by Python notebooks + by `scripts/run_cpsam_on_dir.py`:
+
+```bash
+mamba create -n omnipose python=3.11 pip -y
+mamba activate omnipose
+pip install cellpose==4.1.1 omnipose==0.4.4 jupyterlab tifffile zarr pandas pyarrow pooch plotly anywidget
+python -m ipykernel install --user --name omnipose --display-name "Python (omnipose)"
+```
+
+R env (Seurat 5, harmony, presto, tessera, arrow, tiff) — used by all R workflow notebooks. R kernel registered with Jupyter (`IRkernel::installspec()`) so .ipynb files with `kernelspec.name = "ir"` open with the R kernel.
 
 ## Regenerating ROIs from source
 
