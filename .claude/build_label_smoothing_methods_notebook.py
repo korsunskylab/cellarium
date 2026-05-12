@@ -468,10 +468,10 @@ sweep_long <- tidyr::pivot_longer(sweep_df, -p_specific,
                                    names_to = "method", values_to = "accuracy")
 
 options(repr.plot.width = 9, repr.plot.height = 5)
-pd <- position_dodge(width = 0.012)   # small horizontal offset so coincident lines don't occlude
+pd <- position_dodge(width = 0.04)   # horizontal offset so coincident lines don't occlude
 ggplot(sweep_long, aes(p_specific, accuracy, color = method, group = method)) +
-  geom_line(linewidth = 1, position = pd) +
-  geom_point(size = 3, position = pd) +
+  geom_line(linewidth = 0.7, position = pd) +
+  geom_point(size = 2.2, position = pd) +
   geom_vline(xintercept = 0.136, linetype = "dashed", color = "grey50") +
   annotate("text", x = 0.136, y = 0.45, label = "real data\\n(13.6% specific)",
             hjust = -0.1, size = 3, color = "grey40") +
