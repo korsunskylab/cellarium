@@ -224,18 +224,18 @@ post_naive <- naive_pool(prior_mat, knn)
 cat(sprintf("naive pooling: %.2f s\\n",
             as.numeric(difftime(Sys.time(), t0, units = "secs"))))"""))
 
-cells.append(md("""### 3.2 Soft, confidence-aware label propagation
+cells.append(md("""### 3.2 Label propagation — hard-anchor vs soft-α
 
-Each transcript gets a per-transcript α ∈ [0, 1] controlling how much of its **prior** is preserved each iteration vs. how much new information **flows in** from K-NN neighbors:
+Both variants share the same update rule:
 
 $$p_i^{(t+1)} = \\alpha_i \\cdot p_i^{(0)} \\;+\\; (1 - \\alpha_i) \\cdot \\overline{p}_{j \\in N(i)}^{(t)}$$
 
-- α = 1 → fully clamped, prior never updates (the old hard-anchor behavior).
-- α = 0.85 → mostly prior, slow neighbor inflow (soft anchor — protects high-confidence transcripts while letting them be nudged by strong local consensus).
-- α = 0.5 → balanced (multi-class genes: keep family bias but defer to neighborhood within the family).
-- α = 0 → pure neighborhood averaging (ambiguous transcripts).
+They differ only in `α_specific`:
 
-Tunables `alpha_specific / alpha_multiclass / alpha_ambiguous` set the inflow rates per kind."""))
+- **LP-hard** — `α_specific = 1.0`: specific-gene priors are *fully clamped* and never update. This is the standard semi-supervised label-propagation setup. Pro: anchors are guaranteed protected. Con: a mislabeled anchor poisons its neighborhood forever.
+- **LP-soft** — `α_specific = 0.85`: specific-gene priors are *mostly preserved* (small neighbor inflow per iteration). Pro: a mislabeled anchor can be corrected over many iterations by strong local consensus. Con: anchor preservation is a function of α, not guaranteed.
+
+Both variants use the same `α_multiclass = 0.5` and `α_ambiguous = 0.0` for non-specific transcripts."""))
 
 cells.append(code("""label_prop_soft <- function(prior, knn_idx, alpha, n_iter = 15) {
   # alpha: length-n vector in [0, 1]. Higher α = more prior preserved.
@@ -254,26 +254,28 @@ cells.append(code("""label_prop_soft <- function(prior, knn_idx, alpha, n_iter =
 }
 
 # Per-kind α values
-alpha_specific   <- 0.85   # high-confidence: mostly keep prior, small neighbor inflow
-alpha_multiclass <- 0.50   # medium: balance prior family-bias with local consensus
-alpha_ambiguous  <- 0.00   # low: fully neighbor-determined
+alpha_specific_hard <- 1.00   # hard anchor — fully clamped
+alpha_specific_soft <- 0.85   # soft anchor — small neighbor inflow per iter
+alpha_multiclass    <- 0.50   # medium: balance prior family-bias with local consensus
+alpha_ambiguous     <- 0.00   # low: fully neighbor-determined
 
-alpha_vec <- c(specific = alpha_specific,
-               multiclass = alpha_multiclass,
-               ambiguous = alpha_ambiguous)[as.character(df_tx$kind)]
+alpha_hard <- c(specific = alpha_specific_hard, multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(df_tx$kind)]
+alpha_soft <- c(specific = alpha_specific_soft, multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(df_tx$kind)]
 
 # is_anchor still used by Potts in 3.3 (Potts does hard anchoring)
 is_anchor <- df_tx$kind == "specific"
 
-cat(sprintf("α distribution: specific=%.2f (n=%d), multiclass=%.2f (n=%d), ambiguous=%.2f (n=%d)\\n",
-            alpha_specific,   sum(df_tx$kind == "specific"),
+cat(sprintf("α profiles (per kind): specific=%.2f/%.2f (hard/soft, n=%d)  multiclass=%.2f (n=%d)  ambiguous=%.2f (n=%d)\\n",
+            alpha_specific_hard, alpha_specific_soft, sum(df_tx$kind == "specific"),
             alpha_multiclass, sum(df_tx$kind == "multiclass"),
             alpha_ambiguous,  sum(df_tx$kind == "ambiguous")))
 
 t0 <- Sys.time()
-post_lp <- label_prop_soft(prior_mat, knn, alpha_vec, n_iter = 15)
-cat(sprintf("soft label propagation: %.2f s (15 iter)\\n",
-            as.numeric(difftime(Sys.time(), t0, units = "secs"))))"""))
+post_lp_hard <- label_prop_soft(prior_mat, knn, alpha_hard, n_iter = 15)
+post_lp_soft <- label_prop_soft(prior_mat, knn, alpha_soft, n_iter = 15)
+cat(sprintf("LP-hard: %.2f s   LP-soft: %.2f s   (15 iter each)\\n",
+            as.numeric(difftime(Sys.time(), t0, units = "secs")) / 2,
+            as.numeric(difftime(Sys.time(), t0, units = "secs")) / 2))"""))
 
 cells.append(md("""### 3.3 Potts model (Gibbs sampling, anchors clamped)
 
@@ -329,10 +331,11 @@ cells.append(code("""argmax_class <- function(post) factor(type_names[max.col(po
                                        levels = type_names)
 df_tx$pred_prior_argmax <- df_tx$prior_argmax  # already computed
 df_tx$pred_naive        <- argmax_class(post_naive)
-df_tx$pred_lp           <- argmax_class(post_lp)
+df_tx$pred_lp_hard      <- argmax_class(post_lp_hard)
+df_tx$pred_lp_soft      <- argmax_class(post_lp_soft)
 df_tx$pred_potts        <- argmax_class(post_potts)
 
-methods <- c("prior_argmax", "naive", "lp", "potts")
+methods <- c("prior_argmax", "naive", "lp_hard", "lp_soft", "potts")
 accuracy <- function(pred, truth) mean(pred == truth)
 
 acc_overall <- sapply(methods, function(m)
@@ -368,21 +371,22 @@ cells.append(code("""plot_method <- function(col_name, title) {
     labs(title = title)
 }
 
-options(repr.plot.width = 18, repr.plot.height = 9)
-(plot_method("true_type",          "TRUTH") |
- plot_method("pred_prior_argmax",  "argmax of prior (no smoothing)") |
- plot_method("pred_naive",         "naive K-NN pooling")) /
-(plot_method("pred_lp",            "label propagation (anchored)") |
- plot_method("pred_potts",         "Potts model (anchored, β=1.5)") |
- plot_method("true_type",          "TRUTH (repeated for comparison)"))"""))
+options(repr.plot.width = 18, repr.plot.height = 12)
+(plot_method("true_type",         "TRUTH") |
+ plot_method("pred_prior_argmax", "argmax of prior (no smoothing)") |
+ plot_method("pred_naive",        "naive K-NN pooling")) /
+(plot_method("pred_lp_hard",      "LP-hard (α_specific=1.0, clamped)") |
+ plot_method("pred_lp_soft",      "LP-soft (α_specific=0.85)") |
+ plot_method("pred_potts",        "Potts model (anchored, β=1.5)"))"""))
 
 cells.append(md("### 4.4 Posterior uncertainty — entropy maps"))
 
 cells.append(code("""entropy_norm <- function(p) -rowSums(p * log(pmax(p, 1e-12))) / log(ncol(p))
-df_tx$ent_prior <- df_tx$prior_entropy
-df_tx$ent_naive <- entropy_norm(post_naive)
-df_tx$ent_lp    <- entropy_norm(post_lp)
-df_tx$ent_potts <- entropy_norm(post_potts)
+df_tx$ent_prior   <- df_tx$prior_entropy
+df_tx$ent_naive   <- entropy_norm(post_naive)
+df_tx$ent_lp_hard <- entropy_norm(post_lp_hard)
+df_tx$ent_lp_soft <- entropy_norm(post_lp_soft)
+df_tx$ent_potts   <- entropy_norm(post_potts)
 
 plot_entropy <- function(col, title) {
   ggplot(df_tx, aes(x, y, color = .data[[col]])) +
@@ -393,11 +397,12 @@ plot_entropy <- function(col, title) {
     labs(title = title)
 }
 
-options(repr.plot.width = 16, repr.plot.height = 4.5)
-(plot_entropy("ent_prior", "prior entropy") |
- plot_entropy("ent_naive", "naive posterior") |
- plot_entropy("ent_lp",    "label prop posterior") |
- plot_entropy("ent_potts", "Potts posterior"))"""))
+options(repr.plot.width = 20, repr.plot.height = 4.5)
+(plot_entropy("ent_prior",   "prior entropy") |
+ plot_entropy("ent_naive",   "naive posterior") |
+ plot_entropy("ent_lp_hard", "LP-hard posterior") |
+ plot_entropy("ent_lp_soft", "LP-soft posterior") |
+ plot_entropy("ent_potts",   "Potts posterior"))"""))
 
 cells.append(md("""## 5. Sensitivity sweep — vary the specific/ambiguous mix
 
@@ -433,21 +438,22 @@ cells.append(code("""run_pipeline <- function(p_spec, p_multi = 0.1, ambig_noise
   prior_m <- as.matrix(d[, type_names])
   knn_idx <- RANN::nn2(as.matrix(d[, c("x", "y")]), k = K_NN + 1)$nn.idx[, -1]
   is_anc  <- d$kind == "specific"
-  alpha   <- c(specific = alpha_specific,
-                multiclass = alpha_multiclass,
-                ambiguous = alpha_ambiguous)[as.character(d$kind)]
+  alpha_h <- c(specific = alpha_specific_hard, multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(d$kind)]
+  alpha_s <- c(specific = alpha_specific_soft, multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(d$kind)]
 
-  p_argmax <- factor(type_names[max.col(prior_m, ties.method = "first")], levels = type_names)
-  p_naive  <- argmax_class(naive_pool(prior_m, knn_idx))
-  p_lp     <- argmax_class(label_prop_soft(prior_m, knn_idx, alpha, n_iter = 15))
-  p_potts  <- argmax_class(potts_gibbs_anchored(prior_m, knn_idx, is_anc,
-                                                 beta = 1.5, n_iter = 200, burn = 100,
-                                                 seed = seed))
+  p_argmax  <- factor(type_names[max.col(prior_m, ties.method = "first")], levels = type_names)
+  p_naive   <- argmax_class(naive_pool(prior_m, knn_idx))
+  p_lp_hard <- argmax_class(label_prop_soft(prior_m, knn_idx, alpha_h, n_iter = 15))
+  p_lp_soft <- argmax_class(label_prop_soft(prior_m, knn_idx, alpha_s, n_iter = 15))
+  p_potts   <- argmax_class(potts_gibbs_anchored(prior_m, knn_idx, is_anc,
+                                                  beta = 1.5, n_iter = 200, burn = 100,
+                                                  seed = seed))
   truth <- factor(d$true_type, levels = type_names)
-  c(prior_argmax = mean(p_argmax == truth),
-    naive        = mean(p_naive  == truth),
-    lp           = mean(p_lp     == truth),
-    potts        = mean(p_potts  == truth))
+  c(prior_argmax = mean(p_argmax  == truth),
+    naive        = mean(p_naive   == truth),
+    lp_hard      = mean(p_lp_hard == truth),
+    lp_soft      = mean(p_lp_soft == truth),
+    potts        = mean(p_potts   == truth))
 }
 
 p_spec_grid <- c(0.05, 0.10, 0.15, 0.20, 0.30, 0.50, 0.75)
