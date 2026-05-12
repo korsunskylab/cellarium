@@ -1,4 +1,4 @@
-"""Builder for workflow/03_mrna_gradients.ipynb (R kernel).
+"""Builder for workflow/02_mrna_gradients.ipynb (R kernel).
 
 Notebook 1 of the boundary-prior pipeline — playground for estimating per-pixel
 boundary likelihood from local transcriptional gradients. Bones only: data
@@ -608,7 +608,7 @@ nb.metadata = {
     },
 }
 
-out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/workflow/03_mrna_gradients.ipynb")
+out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/workflow/02_mrna_gradients.ipynb")
 out.parent.mkdir(parents=True, exist_ok=True)
 nbf.write(nb, str(out))
 print("wrote:", out)

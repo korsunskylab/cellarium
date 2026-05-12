@@ -1,4 +1,4 @@
-"""Builder for workflow/02_label_smoothing_methods.ipynb (R kernel).
+"""Builder for sandbox/label_smoothing_methods.ipynb (R kernel).
 
 Synthetic test bed for transcript-classification methods that respect a
 soft prior with mixed strength (type-specific anchors + ambiguous/multi-class
@@ -472,7 +472,7 @@ nb.metadata = {
     },
 }
 
-out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/workflow/02_label_smoothing_methods.ipynb")
+out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/sandbox/label_smoothing_methods.ipynb")
 out.parent.mkdir(parents=True, exist_ok=True)
 nbf.write(nb, str(out))
 print("wrote:", out)

@@ -1,4 +1,4 @@
-"""Builder for workflow/04_gap_intervention_test.ipynb.
+"""Builder for workflow/03_gap_intervention_test.ipynb.
 
 Step 0 of the boundary-prior initiative — validates the gap-cut intervention
 on the 18S channel before the upstream gradient pipeline is built.
@@ -1031,7 +1031,7 @@ cells.append(md("""## 3. Findings + design implications for notebooks 1–3
 # ─── Write notebook ───────────────────────────────────────────────────────
 nb.cells = cells
 
-out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/workflow/04_gap_intervention_test.ipynb")
+out = Path("/Users/ik936/Partners HealthCare Dropbox/Ilya Korsunsky/cellarium/workflow/03_gap_intervention_test.ipynb")
 out.parent.mkdir(parents=True, exist_ok=True)
 nbf.write(nb, str(out))
 print("wrote:", out)

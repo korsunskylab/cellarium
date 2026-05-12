@@ -7,9 +7,9 @@ Each `build_*_notebook.py` is an `nbformat`-based script that, when run, writes 
 | Builder | Output |
 |---|---|
 | `build_celltype_gt_notebook.py`            | `workflow/01_celltype_ground_truth.ipynb` |
-| `build_label_smoothing_methods_notebook.py` | `workflow/02_label_smoothing_methods.ipynb` |
-| `build_mrna_gradients_notebook.py`         | `workflow/03_mrna_gradients.ipynb` |
-| `build_gap_intervention_test_notebook.py`  | `workflow/04_gap_intervention_test.ipynb` |
+| `build_mrna_gradients_notebook.py`         | `workflow/02_mrna_gradients.ipynb` |
+| `build_gap_intervention_test_notebook.py`  | `workflow/03_gap_intervention_test.ipynb` |
+| `build_label_smoothing_methods_notebook.py` | `sandbox/label_smoothing_methods.ipynb` |
 | `build_xenium_roi_crop_notebook.py`        | `tools/xenium_roi_crop_cpsam.ipynb` |
 | `build_multi_roi_comparison_notebook.py`   | `tools/multi_roi_comparison.ipynb` |
 | `build_omnipose_test_notebook.py`          | `sandbox/omnipose_install_check.ipynb` |

@@ -20,11 +20,12 @@ Each subfolder has its own README. Start with `workflow/README.md` to reproduce 
 ## Top-level pipeline narrative
 
 1. **`workflow/01_celltype_ground_truth.ipynb`** (R) — Ingest the full 10X-segmented cells (~112k), QC, cluster via Seurat + Harmony, annotate clusters into 15 fine + 7 lineage cell-type labels, build a gene × cell-type count matrix, and emit per-gene lineage labels (one of the 7 types or "ambiguous").
-2. **`workflow/02_label_smoothing_methods.ipynb`** (R) — Synthetic test bed comparing naive K-NN pooling vs anchored label propagation vs Potts-model Gibbs sampling at varying anchor densities. Outcome: label propagation wins at the realistic anchor density (~14% of genes are single-type-specific in this Xenium panel).
-3. **`workflow/03_mrna_gradients.ipynb`** (R) — Per-transcript embedding from the count matrix in (1), filtered by labels, processed via Tessera (mesh + gradient + smoothing) to produce a per-transcript boundary score. Exports `boundary_likelihood.tif` at morphology resolution for the Python pipeline.
-4. **`workflow/04_gap_intervention_test.ipynb`** (Python) — Step-0 validation that a Gaussian dim cut on 18S forces CP-SAM to split a merged doublet. Operating window mapped on synthetic + real ROI data.
+2. **`workflow/02_mrna_gradients.ipynb`** (R) — Per-transcript embedding from the count matrix in (1), filtered by labels, processed via Tessera (mesh + gradient + smoothing) to produce a per-transcript boundary score. Exports `boundary_likelihood.tif` at morphology resolution for the Python pipeline.
+3. **`workflow/03_gap_intervention_test.ipynb`** (Python) — Step-0 validation that a Gaussian dim cut on 18S forces CP-SAM to split a merged doublet. Operating window mapped on synthetic + real ROI data.
 
-The integration step (apply boundary mask from notebook 03 to the 18S channel + re-run CP-SAM) is set up at the end of notebook 03 (`§7 cpsam_roundtrip`).
+The integration step (apply boundary mask from notebook 02 to the 18S channel + re-run CP-SAM) is set up at the end of notebook 02 (`§7 cpsam_roundtrip`).
+
+`sandbox/label_smoothing_methods.ipynb` compares method options (naive pooling vs anchored label propagation vs Potts MRF) on synthetic data. Findings will inform notebook 02 once integrated.
 
 ## Recommended CP-SAM settings
 
