@@ -48,9 +48,9 @@ suppressPackageStartupMessages({
 
 cells.append(md("""## 1. Generate synthetic data
 
-### 1.1 Layout: 4 cell types arranged in 2×2 regions of cells
+### 1.1 Layout: 4 cell types in a CHECKERBOARD on a 6×6 grid
 
-Each region holds a 3×3 grid of *cells*. Each cell has a fixed true type. This gives clean type boundaries (between regions) but multiple cells of the same type so we can see within-region homogeneity vs. across-region transitions."""))
+Every cell has only **different-type direct neighbors** (horizontal/vertical/diagonal). There's no same-type cluster of cells to use as a coherent reservoir — LP has to propagate purely from within-cell anchors. This is the hardest possible spatial layout for label-propagation methods. Combined with touching cells (no gap) and weak anchors (`specific_anchor = 0.5`), this is the proper stress test."""))
 
 cells.append(code("""# ─── Cell-type layout ─────────────────────────────────────────────────
 K          <- 4
@@ -60,16 +60,18 @@ type_palette <- c(A = "#D62728", B = "#1F77B4", C = "#2CA02C", D = "#FF7F0E")
 # 6×6 grid of cells (36 cells total)
 n_cells_x <- 6; n_cells_y <- 6
 cell_size <- 10    # microns per cell
-cell_centers <- expand.grid(cx = 1:n_cells_x, cy = 1:n_cells_y)
-cell_centers$cx <- cell_centers$cx * cell_size - cell_size / 2
-cell_centers$cy <- cell_centers$cy * cell_size - cell_size / 2
+cell_centers <- expand.grid(i = 1:n_cells_x, j = 1:n_cells_y)
 
-# Assign type per cell by quadrant (clean boundaries between regions)
-midX <- (n_cells_x * cell_size) / 2
-midY <- (n_cells_y * cell_size) / 2
-cell_centers$type <- type_names[
-  1 + (cell_centers$cx > midX) + 2 * (cell_centers$cy > midY)
-]
+# CHECKERBOARD type layout — every cell has only different-type direct neighbors.
+# Type by parity of (i, j) indices:
+#   (i odd, j odd) → A     (i even, j odd) → B
+#   (i odd, j even) → C    (i even, j even) → D
+i_even <- (cell_centers$i %% 2L) == 0L
+j_even <- (cell_centers$j %% 2L) == 0L
+cell_centers$type <- type_names[1L + i_even + 2L * j_even]
+
+cell_centers$cx <- cell_centers$i * cell_size - cell_size / 2
+cell_centers$cy <- cell_centers$j * cell_size - cell_size / 2
 
 ggplot(cell_centers, aes(cx, cy, color = type)) +
   geom_point(size = 6) +
@@ -98,7 +100,9 @@ p_ambiguous      <- 0.45    # fraction of "ambiguous / housekeeping" transcripts
 p_multiclass     <- 0.15    # fraction of "multi-class gene" transcripts (e.g., PTPRC across immune)
 stopifnot(abs(p_specific + p_ambiguous + p_multiclass - 1) < 1e-9)
 
-specific_anchor  <- 0.85    # mass on true type for specific points; rest split uniformly
+specific_anchor  <- 0.50    # mass on true type for specific points; rest split uniformly
+                            # (was 0.85; lowered to mimic real markers like CD68 which are
+                            # tilted-but-not-razor-sharp toward their type)
 ambig_noise      <- 0.05    # sd of Gaussian noise added to uniform for ambiguous priors
 
 # Multi-class families: types that look similar (e.g. all immune, all epithelial)
@@ -220,31 +224,55 @@ post_naive <- naive_pool(prior_mat, knn)
 cat(sprintf("naive pooling: %.2f s\\n",
             as.numeric(difftime(Sys.time(), t0, units = "secs"))))"""))
 
-cells.append(md("""### 3.2 Confidence-aware label propagation with anchors
+cells.append(md("""### 3.2 Soft, confidence-aware label propagation
 
-Specific-gene transcripts are *clamped* (their prior is treated as truth, never updated). Followers iteratively average among their K-NN. After 15 iterations, the anchored regions have propagated their labels into the ambiguous regions while themselves staying fixed."""))
+Each transcript gets a per-transcript α ∈ [0, 1] controlling how much of its **prior** is preserved each iteration vs. how much new information **flows in** from K-NN neighbors:
 
-cells.append(code("""label_prop_anchored <- function(prior, knn_idx, is_anchor, n_iter = 15) {
+$$p_i^{(t+1)} = \\alpha_i \\cdot p_i^{(0)} \\;+\\; (1 - \\alpha_i) \\cdot \\overline{p}_{j \\in N(i)}^{(t)}$$
+
+- α = 1 → fully clamped, prior never updates (the old hard-anchor behavior).
+- α = 0.85 → mostly prior, slow neighbor inflow (soft anchor — protects high-confidence transcripts while letting them be nudged by strong local consensus).
+- α = 0.5 → balanced (multi-class genes: keep family bias but defer to neighborhood within the family).
+- α = 0 → pure neighborhood averaging (ambiguous transcripts).
+
+Tunables `alpha_specific / alpha_multiclass / alpha_ambiguous` set the inflow rates per kind."""))
+
+cells.append(code("""label_prop_soft <- function(prior, knn_idx, alpha, n_iter = 15) {
+  # alpha: length-n vector in [0, 1]. Higher α = more prior preserved.
   n <- nrow(prior); K <- ncol(prior)
   p <- prior
-  not_anchor <- which(!is_anchor)
+  movers <- which(alpha < 1)   # α=1 transcripts are fully clamped, skip update
   for (iter in seq_len(n_iter)) {
     new_p <- p
-    for (i in not_anchor) {
-      new_p[i, ] <- colMeans(p[knn_idx[i, ], , drop = FALSE])
+    for (i in movers) {
+      neighbor_mean <- colMeans(p[knn_idx[i, ], , drop = FALSE])
+      new_p[i, ] <- alpha[i] * prior[i, ] + (1 - alpha[i]) * neighbor_mean
     }
     p <- new_p
   }
   p
 }
 
+# Per-kind α values
+alpha_specific   <- 0.85   # high-confidence: mostly keep prior, small neighbor inflow
+alpha_multiclass <- 0.50   # medium: balance prior family-bias with local consensus
+alpha_ambiguous  <- 0.00   # low: fully neighbor-determined
+
+alpha_vec <- c(specific = alpha_specific,
+               multiclass = alpha_multiclass,
+               ambiguous = alpha_ambiguous)[as.character(df_tx$kind)]
+
+# is_anchor still used by Potts in 3.3 (Potts does hard anchoring)
 is_anchor <- df_tx$kind == "specific"
-cat(sprintf("anchors: %d of %d (%.1f%%)\\n",
-            sum(is_anchor), length(is_anchor), 100 * mean(is_anchor)))
+
+cat(sprintf("α distribution: specific=%.2f (n=%d), multiclass=%.2f (n=%d), ambiguous=%.2f (n=%d)\\n",
+            alpha_specific,   sum(df_tx$kind == "specific"),
+            alpha_multiclass, sum(df_tx$kind == "multiclass"),
+            alpha_ambiguous,  sum(df_tx$kind == "ambiguous")))
 
 t0 <- Sys.time()
-post_lp <- label_prop_anchored(prior_mat, knn, is_anchor, n_iter = 15)
-cat(sprintf("label propagation: %.2f s (15 iter)\\n",
+post_lp <- label_prop_soft(prior_mat, knn, alpha_vec, n_iter = 15)
+cat(sprintf("soft label propagation: %.2f s (15 iter)\\n",
             as.numeric(difftime(Sys.time(), t0, units = "secs"))))"""))
 
 cells.append(md("""### 3.3 Potts model (Gibbs sampling, anchors clamped)
@@ -405,10 +433,13 @@ cells.append(code("""run_pipeline <- function(p_spec, p_multi = 0.1, ambig_noise
   prior_m <- as.matrix(d[, type_names])
   knn_idx <- RANN::nn2(as.matrix(d[, c("x", "y")]), k = K_NN + 1)$nn.idx[, -1]
   is_anc  <- d$kind == "specific"
+  alpha   <- c(specific = alpha_specific,
+                multiclass = alpha_multiclass,
+                ambiguous = alpha_ambiguous)[as.character(d$kind)]
 
   p_argmax <- factor(type_names[max.col(prior_m, ties.method = "first")], levels = type_names)
   p_naive  <- argmax_class(naive_pool(prior_m, knn_idx))
-  p_lp     <- argmax_class(label_prop_anchored(prior_m, knn_idx, is_anc, n_iter = 15))
+  p_lp     <- argmax_class(label_prop_soft(prior_m, knn_idx, alpha, n_iter = 15))
   p_potts  <- argmax_class(potts_gibbs_anchored(prior_m, knn_idx, is_anc,
                                                  beta = 1.5, n_iter = 200, burn = 100,
                                                  seed = seed))
