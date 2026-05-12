@@ -12,11 +12,9 @@ Reading list for the PC-gradient-field / boundary-detection MVP in `sandbox/pc_g
 
 ## Primer (read first, if you only read one)
 
-| Source | What |
-|---|---|
-| Szeliski, *Computer Vision: Algorithms and Applications* (2nd ed) — **Chapter 7** | One-stop primer that pulls together everything above. Free PDF available at <https://szeliski.org/Book/> (requires a quick form). ~30 pages. |
-
-Not included in this folder because Szeliski's website asks for an email before serving the PDF — fill the form once, save it locally if you want it offline.
+| File | Citation | Read | Why |
+|---|---|---|---|
+| `Szeliski_CVAABook_2ndEd_chap7.pdf` | Szeliski, *Computer Vision: Algorithms and Applications* (2nd ed), Ch. 7 "Feature detection and matching" | §7.2 (edges & contours) is the directly relevant part | One-stop primer that pulls together everything above. Full chapter is 84 pp; §7.2 is the edge-detection core. |
 
 ## Extensions (one rabbit hole per question)
 
@@ -30,7 +28,7 @@ Not included in this folder because Szeliski's website asks for an email before 
 
 | Day | Read |
 |---|---|
-| 1 | Szeliski Ch. 7 (primer) |
+| 1 | `Szeliski_CVAABook_2ndEd_chap7.pdf` §7.2 (primer) |
 | 2 | `di_zenzo_1986.pdf` + `canny_1986.pdf` skim |
 | 3 | `martin_fowlkes_malik_2004.pdf` §2 |
 | 4 (optional) | One of the extensions, depending on your next question |
