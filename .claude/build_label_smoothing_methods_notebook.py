@@ -84,11 +84,14 @@ Each cell produces ~`n_tx_per_cell` transcripts at random positions within its r
 
 - **`specific`** — prior is near-one-hot at the cell's true type
 - **`ambiguous`** — prior is uniform plus Gaussian noise (controlled by `ambig_noise`)
-- **`multiclass`** — prior is uniform over a subset of types that *includes* the true type (e.g., types {A, B} form an "epithelial" family, {C, D} a "stromal" family)"""))
+- **`multiclass`** — prior is uniform over a subset of types that *includes* the true type (e.g., types {A, B} form an "epithelial" family, {C, D} a "stromal" family)
+
+**Hard-case geometry:** transcripts are uniformly distributed inside *square* cells that fully tile the grid (no gaps between cells). A transcript sitting at the edge of its cell will have K-NN neighbors that span the boundary into the adjacent cell of a different type. This is the stress test for label propagation — at boundaries the local-mean signal is mixed."""))
 
 cells.append(code("""# ─── Tunables ────────────────────────────────────────────────────────
 n_tx_per_cell    <- 50      # transcripts per cell
-cell_radius      <- 3.5     # µm — must fit within cell_size/2
+inter_cell_gap   <- 0       # µm — 0 = touching squares; >0 adds a buffer between cells
+half_extent      <- cell_size / 2 - inter_cell_gap / 2
 
 p_specific       <- 0.40    # fraction of "specific gene" transcripts
 p_ambiguous      <- 0.45    # fraction of "ambiguous / housekeeping" transcripts
@@ -126,10 +129,9 @@ rows <- list()
 for (i in seq_len(nrow(cell_centers))) {
   ct <- cell_centers$type[i]; cx <- cell_centers$cx[i]; cy <- cell_centers$cy[i]
   for (j in seq_len(n_tx_per_cell)) {
-    # Uniform-in-disk position inside cell radius
-    r <- sqrt(runif(1)) * cell_radius
-    theta <- runif(1, 0, 2 * pi)
-    x <- cx + r * cos(theta); y <- cy + r * sin(theta)
+    # Uniform within a SQUARE cell (no gap to neighbors by default → boundary stress test)
+    x <- cx + runif(1, -half_extent, half_extent)
+    y <- cy + runif(1, -half_extent, half_extent)
 
     kind <- sample(c("specific", "ambiguous", "multiclass"),
                    1, prob = c(p_specific, p_ambiguous, p_multiclass))
@@ -384,9 +386,8 @@ cells.append(code("""run_pipeline <- function(p_spec, p_multi = 0.1, ambig_noise
   for (i in seq_len(nrow(cell_centers))) {
     ct <- cell_centers$type[i]; cx <- cell_centers$cx[i]; cy <- cell_centers$cy[i]
     for (j in seq_len(n_tx_per_cell)) {
-      r <- sqrt(runif(1)) * cell_radius
-      theta <- runif(1, 0, 2 * pi)
-      x <- cx + r * cos(theta); y <- cy + r * sin(theta)
+      x <- cx + runif(1, -half_extent, half_extent)
+      y <- cy + runif(1, -half_extent, half_extent)
       kind <- sample(c("specific", "ambiguous", "multiclass"),
                      1, prob = c(p_spec, p_amb, p_multi))
       prior <- switch(kind,
