@@ -104,6 +104,10 @@ specific_anchor  <- 0.50    # mass on true type for specific points; rest split 
                             # (was 0.85; lowered to mimic real markers like CD68 which are
                             # tilted-but-not-razor-sharp toward their type)
 ambig_noise      <- 0.05    # sd of Gaussian noise added to uniform for ambiguous priors
+p_anchor_mislabeled <- 0.05 # fraction of specific transcripts whose prior is built around
+                            # a WRONG type (uniformly random over the other K-1). Realistic
+                            # — ambient mRNA attaches to a cell of a different type, so we
+                            # observe a "specific" marker in the wrong context.
 
 # Multi-class families: types that look similar (e.g. all immune, all epithelial)
 families <- list(
@@ -139,23 +143,37 @@ for (i in seq_len(nrow(cell_centers))) {
 
     kind <- sample(c("specific", "ambiguous", "multiclass"),
                    1, prob = c(p_specific, p_ambiguous, p_multiclass))
+    # For specific transcripts, with probability p_anchor_mislabeled the prior is built
+    # around a WRONG type (mimics ambient mRNA leaking into a cell of a different type).
+    mislabeled <- FALSE
+    type_for_prior <- ct
+    if (kind == "specific" && runif(1) < p_anchor_mislabeled) {
+      type_for_prior <- sample(setdiff(type_names, ct), 1)
+      mislabeled <- TRUE
+    }
     prior <- switch(kind,
-                    specific   = mk_specific_prior(ct),
+                    specific   = mk_specific_prior(type_for_prior),
                     ambiguous  = mk_ambiguous_prior(),
                     multiclass = mk_multiclass_prior(ct))
     rows[[length(rows) + 1]] <- c(list(x = x, y = y, cell_id = i,
-                                       true_type = ct, kind = kind),
+                                       true_type = ct, kind = kind,
+                                       mislabeled = mislabeled,
+                                       type_for_prior = type_for_prior),
                                   setNames(as.list(prior), type_names))
   }
 }
 df_tx <- do.call(rbind, lapply(rows, as.data.frame))
-df_tx$true_type <- factor(df_tx$true_type, levels = type_names)
-df_tx$kind      <- factor(df_tx$kind, levels = c("specific", "ambiguous", "multiclass"))
+df_tx$true_type      <- factor(df_tx$true_type,      levels = type_names)
+df_tx$type_for_prior <- factor(df_tx$type_for_prior, levels = type_names)
+df_tx$kind           <- factor(df_tx$kind, levels = c("specific", "ambiguous", "multiclass"))
 N <- nrow(df_tx)
 
 cat(sprintf("N transcripts: %d  (cells: %d, K types: %d)\\n", N, nrow(cell_centers), K))
 cat("By kind:\\n"); print(table(df_tx$kind))
-cat("\\nBy true type:\\n"); print(table(df_tx$true_type))"""))
+cat("\\nBy true type:\\n"); print(table(df_tx$true_type))
+cat(sprintf("\\nMislabeled specific transcripts: %d of %d (target %.0f%%)\\n",
+            sum(df_tx$mislabeled), sum(df_tx$kind == "specific"),
+            100 * p_anchor_mislabeled))"""))
 
 cells.append(md("### 1.3 Visualize ground truth + priors"))
 
@@ -224,18 +242,19 @@ post_naive <- naive_pool(prior_mat, knn)
 cat(sprintf("naive pooling: %.2f s\\n",
             as.numeric(difftime(Sys.time(), t0, units = "secs"))))"""))
 
-cells.append(md("""### 3.2 Label propagation — hard-anchor vs soft-α
+cells.append(md("""### 3.2 Label propagation — three α profiles along the protection-vs-correction tradeoff
 
-Both variants share the same update rule:
+All three variants share the same update rule:
 
 $$p_i^{(t+1)} = \\alpha_i \\cdot p_i^{(0)} \\;+\\; (1 - \\alpha_i) \\cdot \\overline{p}_{j \\in N(i)}^{(t)}$$
 
 They differ only in `α_specific`:
 
-- **LP-hard** — `α_specific = 1.0`: specific-gene priors are *fully clamped* and never update. This is the standard semi-supervised label-propagation setup. Pro: anchors are guaranteed protected. Con: a mislabeled anchor poisons its neighborhood forever.
-- **LP-soft** — `α_specific = 0.85`: specific-gene priors are *mostly preserved* (small neighbor inflow per iteration). Pro: a mislabeled anchor can be corrected over many iterations by strong local consensus. Con: anchor preservation is a function of α, not guaranteed.
+- **LP-hard** — `α_specific = 1.0`: anchors are fully clamped, never update. Maximum protection of correctly-labeled anchors; zero correction of mislabeled ones.
+- **LP-soft** — `α_specific = 0.85`: small neighbor inflow per iteration. In practice at this α, neighbor inflow is too weak to flip a mislabeled argmax — so it behaves identically to LP-hard on this test (kept for comparison).
+- **LP-correct** — `α_specific = 0.30`: substantial neighbor inflow. A mislabeled anchor surrounded by a coherent majority of a different type gets pulled toward that majority. Mathematically, at α ≤ ~0.5 the neighbor contribution can outvote a weak (0.5-mass) anchor prior, so correction kicks in. Cost: some correctly-labeled anchors at boundaries get pulled away too.
 
-Both variants use the same `α_multiclass = 0.5` and `α_ambiguous = 0.0` for non-specific transcripts."""))
+The three together sketch the **protection-vs-correction tradeoff curve**. All use `α_multiclass = 0.5` and `α_ambiguous = 0.0` for non-specific transcripts."""))
 
 cells.append(code("""label_prop_soft <- function(prior, knn_idx, alpha, n_iter = 15) {
   # alpha: length-n vector in [0, 1]. Higher α = more prior preserved.
@@ -254,28 +273,32 @@ cells.append(code("""label_prop_soft <- function(prior, knn_idx, alpha, n_iter =
 }
 
 # Per-kind α values
-alpha_specific_hard <- 1.00   # hard anchor — fully clamped
-alpha_specific_soft <- 0.85   # soft anchor — small neighbor inflow per iter
-alpha_multiclass    <- 0.50   # medium: balance prior family-bias with local consensus
-alpha_ambiguous     <- 0.00   # low: fully neighbor-determined
+alpha_specific_hard    <- 1.00   # hard anchor — fully clamped
+alpha_specific_soft    <- 0.85   # soft anchor — small neighbor inflow (≈ identical to hard at this α)
+alpha_specific_correct <- 0.30   # correcting anchor — substantial inflow, can flip mislabeled anchors
+alpha_multiclass       <- 0.50   # medium: balance prior family-bias with local consensus
+alpha_ambiguous        <- 0.00   # low: fully neighbor-determined
 
-alpha_hard <- c(specific = alpha_specific_hard, multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(df_tx$kind)]
-alpha_soft <- c(specific = alpha_specific_soft, multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(df_tx$kind)]
+alpha_hard    <- c(specific = alpha_specific_hard,    multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(df_tx$kind)]
+alpha_soft    <- c(specific = alpha_specific_soft,    multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(df_tx$kind)]
+alpha_correct <- c(specific = alpha_specific_correct, multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(df_tx$kind)]
 
 # is_anchor still used by Potts in 3.3 (Potts does hard anchoring)
 is_anchor <- df_tx$kind == "specific"
 
-cat(sprintf("α profiles (per kind): specific=%.2f/%.2f (hard/soft, n=%d)  multiclass=%.2f (n=%d)  ambiguous=%.2f (n=%d)\\n",
-            alpha_specific_hard, alpha_specific_soft, sum(df_tx$kind == "specific"),
+cat(sprintf("α profiles (per kind): specific=%.2f/%.2f/%.2f (hard/soft/correct, n=%d)\\n",
+            alpha_specific_hard, alpha_specific_soft, alpha_specific_correct,
+            sum(df_tx$kind == "specific")))
+cat(sprintf("                       multiclass=%.2f (n=%d)  ambiguous=%.2f (n=%d)\\n",
             alpha_multiclass, sum(df_tx$kind == "multiclass"),
             alpha_ambiguous,  sum(df_tx$kind == "ambiguous")))
 
 t0 <- Sys.time()
-post_lp_hard <- label_prop_soft(prior_mat, knn, alpha_hard, n_iter = 15)
-post_lp_soft <- label_prop_soft(prior_mat, knn, alpha_soft, n_iter = 15)
-cat(sprintf("LP-hard: %.2f s   LP-soft: %.2f s   (15 iter each)\\n",
-            as.numeric(difftime(Sys.time(), t0, units = "secs")) / 2,
-            as.numeric(difftime(Sys.time(), t0, units = "secs")) / 2))"""))
+post_lp_hard    <- label_prop_soft(prior_mat, knn, alpha_hard,    n_iter = 15)
+post_lp_soft    <- label_prop_soft(prior_mat, knn, alpha_soft,    n_iter = 15)
+post_lp_correct <- label_prop_soft(prior_mat, knn, alpha_correct, n_iter = 15)
+cat(sprintf("LP × 3 variants: %.2f s total (15 iter each)\\n",
+            as.numeric(difftime(Sys.time(), t0, units = "secs"))))"""))
 
 cells.append(md("""### 3.3 Potts model (Gibbs sampling, anchors clamped)
 
@@ -333,9 +356,10 @@ df_tx$pred_prior_argmax <- df_tx$prior_argmax  # already computed
 df_tx$pred_naive        <- argmax_class(post_naive)
 df_tx$pred_lp_hard      <- argmax_class(post_lp_hard)
 df_tx$pred_lp_soft      <- argmax_class(post_lp_soft)
+df_tx$pred_lp_correct   <- argmax_class(post_lp_correct)
 df_tx$pred_potts        <- argmax_class(post_potts)
 
-methods <- c("prior_argmax", "naive", "lp_hard", "lp_soft", "potts")
+methods <- c("prior_argmax", "naive", "lp_hard", "lp_soft", "lp_correct", "potts")
 accuracy <- function(pred, truth) mean(pred == truth)
 
 acc_overall <- sapply(methods, function(m)
@@ -350,15 +374,33 @@ print(round(acc_overall, 3))
 cat("\\nAccuracy by transcript kind:\\n")
 print(round(acc_by_kind, 3))"""))
 
-cells.append(md("### 4.2 Anchor preservation — did any specific-gene transcript get reassigned?"))
+cells.append(md("""### 4.2 Anchor outcomes — correctly-labeled vs mislabeled
 
-cells.append(code("""anchor_reassignment <- sapply(methods, function(m) {
+Split the "specific" transcripts into two groups by whether their prior was built from the true type (`mislabeled = FALSE`) or a wrong type (`mislabeled = TRUE`).
+
+- **Correctly-labeled anchors** — we want method-prediction = true type. A miss here is a *protection failure* (the prior was right and the method ignored it).
+- **Mislabeled anchors** — the prior is wrong; we want method-prediction = true type. A hit here is a *correction* (the method overrode a wrong prior using neighborhood info). LP-hard cannot correct (anchor is clamped). LP-soft might correct, depending on α and the strength of local consensus."""))
+
+cells.append(code("""good_anchor <- df_tx$kind == "specific" & !df_tx$mislabeled
+bad_anchor  <- df_tx$kind == "specific" &  df_tx$mislabeled
+
+stats_anchors <- sapply(methods, function(m) {
   pred <- df_tx[[paste0("pred_", m)]]
-  is_specific <- df_tx$kind == "specific"
-  sum(pred[is_specific] != df_tx$true_type[is_specific])
+  c(good_preserved = sum(pred[good_anchor] == df_tx$true_type[good_anchor]),
+    good_total     = sum(good_anchor),
+    bad_corrected  = sum(pred[bad_anchor]  == df_tx$true_type[bad_anchor]),
+    bad_total      = sum(bad_anchor))
 })
-cat("Number of specific-gene transcripts assigned to a non-true class (lower = better, ideal = 0):\\n")
-print(anchor_reassignment)"""))
+
+cat("Correctly-labeled anchors (higher = better protection):\\n")
+print(rbind(preserved = stats_anchors["good_preserved", ],
+            total     = stats_anchors["good_total", ],
+            rate      = round(stats_anchors["good_preserved", ] / stats_anchors["good_total", ], 3)))
+
+cat("\\nMislabeled anchors (higher = more corrections from neighborhood consensus):\\n")
+print(rbind(corrected = stats_anchors["bad_corrected", ],
+            total     = stats_anchors["bad_total", ],
+            rate      = round(stats_anchors["bad_corrected", ] / pmax(stats_anchors["bad_total", ], 1), 3)))"""))
 
 cells.append(md("### 4.3 Spatial maps — truth vs. each method"))
 
@@ -375,18 +417,22 @@ options(repr.plot.width = 18, repr.plot.height = 12)
 (plot_method("true_type",         "TRUTH") |
  plot_method("pred_prior_argmax", "argmax of prior (no smoothing)") |
  plot_method("pred_naive",        "naive K-NN pooling")) /
-(plot_method("pred_lp_hard",      "LP-hard (α_specific=1.0, clamped)") |
- plot_method("pred_lp_soft",      "LP-soft (α_specific=0.85)") |
- plot_method("pred_potts",        "Potts model (anchored, β=1.5)"))"""))
+(plot_method("pred_lp_hard",      "LP-hard (α=1.0, clamped)") |
+ plot_method("pred_lp_soft",      "LP-soft (α=0.85)") |
+ plot_method("pred_lp_correct",   "LP-correct (α=0.3)")) /
+(plot_method("pred_potts",        "Potts model (anchored, β=1.5)") |
+ plot_method("true_type",         "TRUTH (repeated)") |
+ plot_method("true_type",         "TRUTH (repeated)"))"""))
 
 cells.append(md("### 4.4 Posterior uncertainty — entropy maps"))
 
 cells.append(code("""entropy_norm <- function(p) -rowSums(p * log(pmax(p, 1e-12))) / log(ncol(p))
-df_tx$ent_prior   <- df_tx$prior_entropy
-df_tx$ent_naive   <- entropy_norm(post_naive)
-df_tx$ent_lp_hard <- entropy_norm(post_lp_hard)
-df_tx$ent_lp_soft <- entropy_norm(post_lp_soft)
-df_tx$ent_potts   <- entropy_norm(post_potts)
+df_tx$ent_prior      <- df_tx$prior_entropy
+df_tx$ent_naive      <- entropy_norm(post_naive)
+df_tx$ent_lp_hard    <- entropy_norm(post_lp_hard)
+df_tx$ent_lp_soft    <- entropy_norm(post_lp_soft)
+df_tx$ent_lp_correct <- entropy_norm(post_lp_correct)
+df_tx$ent_potts      <- entropy_norm(post_potts)
 
 plot_entropy <- function(col, title) {
   ggplot(df_tx, aes(x, y, color = .data[[col]])) +
@@ -397,12 +443,13 @@ plot_entropy <- function(col, title) {
     labs(title = title)
 }
 
-options(repr.plot.width = 20, repr.plot.height = 4.5)
-(plot_entropy("ent_prior",   "prior entropy") |
- plot_entropy("ent_naive",   "naive posterior") |
- plot_entropy("ent_lp_hard", "LP-hard posterior") |
- plot_entropy("ent_lp_soft", "LP-soft posterior") |
- plot_entropy("ent_potts",   "Potts posterior"))"""))
+options(repr.plot.width = 22, repr.plot.height = 4.5)
+(plot_entropy("ent_prior",      "prior entropy") |
+ plot_entropy("ent_naive",      "naive posterior") |
+ plot_entropy("ent_lp_hard",    "LP-hard posterior") |
+ plot_entropy("ent_lp_soft",    "LP-soft posterior") |
+ plot_entropy("ent_lp_correct", "LP-correct posterior") |
+ plot_entropy("ent_potts",      "Potts posterior"))"""))
 
 cells.append(md("""## 5. Sensitivity sweep — vary the specific/ambiguous mix
 
@@ -423,8 +470,12 @@ cells.append(code("""run_pipeline <- function(p_spec, p_multi = 0.1, ambig_noise
       y <- cy + runif(1, -half_extent, half_extent)
       kind <- sample(c("specific", "ambiguous", "multiclass"),
                      1, prob = c(p_spec, p_amb, p_multi))
+      type_for_prior <- ct
+      if (kind == "specific" && runif(1) < p_anchor_mislabeled) {
+        type_for_prior <- sample(setdiff(type_names, ct), 1)
+      }
       prior <- switch(kind,
-                      specific   = mk_specific_prior(ct),
+                      specific   = mk_specific_prior(type_for_prior),
                       ambiguous  = { local_noise <- ambig_noise_val
                                      p <- 1 / K + rnorm(K, 0, local_noise)
                                      p <- pmax(p, 1e-6); p / sum(p) },
@@ -438,22 +489,25 @@ cells.append(code("""run_pipeline <- function(p_spec, p_multi = 0.1, ambig_noise
   prior_m <- as.matrix(d[, type_names])
   knn_idx <- RANN::nn2(as.matrix(d[, c("x", "y")]), k = K_NN + 1)$nn.idx[, -1]
   is_anc  <- d$kind == "specific"
-  alpha_h <- c(specific = alpha_specific_hard, multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(d$kind)]
-  alpha_s <- c(specific = alpha_specific_soft, multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(d$kind)]
+  alpha_h <- c(specific = alpha_specific_hard,    multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(d$kind)]
+  alpha_s <- c(specific = alpha_specific_soft,    multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(d$kind)]
+  alpha_c <- c(specific = alpha_specific_correct, multiclass = alpha_multiclass, ambiguous = alpha_ambiguous)[as.character(d$kind)]
 
-  p_argmax  <- factor(type_names[max.col(prior_m, ties.method = "first")], levels = type_names)
-  p_naive   <- argmax_class(naive_pool(prior_m, knn_idx))
-  p_lp_hard <- argmax_class(label_prop_soft(prior_m, knn_idx, alpha_h, n_iter = 15))
-  p_lp_soft <- argmax_class(label_prop_soft(prior_m, knn_idx, alpha_s, n_iter = 15))
-  p_potts   <- argmax_class(potts_gibbs_anchored(prior_m, knn_idx, is_anc,
-                                                  beta = 1.5, n_iter = 200, burn = 100,
-                                                  seed = seed))
+  p_argmax     <- factor(type_names[max.col(prior_m, ties.method = "first")], levels = type_names)
+  p_naive      <- argmax_class(naive_pool(prior_m, knn_idx))
+  p_lp_hard    <- argmax_class(label_prop_soft(prior_m, knn_idx, alpha_h, n_iter = 15))
+  p_lp_soft    <- argmax_class(label_prop_soft(prior_m, knn_idx, alpha_s, n_iter = 15))
+  p_lp_correct <- argmax_class(label_prop_soft(prior_m, knn_idx, alpha_c, n_iter = 15))
+  p_potts      <- argmax_class(potts_gibbs_anchored(prior_m, knn_idx, is_anc,
+                                                     beta = 1.5, n_iter = 200, burn = 100,
+                                                     seed = seed))
   truth <- factor(d$true_type, levels = type_names)
-  c(prior_argmax = mean(p_argmax  == truth),
-    naive        = mean(p_naive   == truth),
-    lp_hard      = mean(p_lp_hard == truth),
-    lp_soft      = mean(p_lp_soft == truth),
-    potts        = mean(p_potts   == truth))
+  c(prior_argmax = mean(p_argmax     == truth),
+    naive        = mean(p_naive      == truth),
+    lp_hard      = mean(p_lp_hard    == truth),
+    lp_soft      = mean(p_lp_soft    == truth),
+    lp_correct   = mean(p_lp_correct == truth),
+    potts        = mean(p_potts      == truth))
 }
 
 p_spec_grid <- c(0.05, 0.10, 0.15, 0.20, 0.30, 0.50, 0.75)
