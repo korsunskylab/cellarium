@@ -64,13 +64,39 @@ def make_roi_bbox_centred(cx_um: float, cy_um: float, size_px: int,
     return int(y0), int(y1), int(x0), int(x1)
 
 
+# Module-level cache for the full-WSI morphology pages.  Loading each is ~1.7 GB
+# and ~10 s; we want to amortise that across many ROI crops in a batch.
+_FULL_DAPI = None
+_FULL_S18  = None
+
+
+def _load_full_wsi_pages():
+    """Read the full DAPI and 18S WSI pages once and cache them in memory.
+
+    IMPORTANT: We must use `tifffile.imread(path, key=0)` here, NOT
+    `TiffFile(path).series[0].asarray(key=0)`. The latter hits the "OME
+    series cannot read multi-file pyramids" path inside tifffile and
+    silently returns the *same* IFD for both DAPI and 18S files — a
+    devastating bug that makes the boundary-prior cut a no-op.
+    """
+    global _FULL_DAPI, _FULL_S18
+    if _FULL_DAPI is None:
+        _FULL_DAPI = tifffile.imread(DAPI_TIF, key=0)
+    if _FULL_S18 is None:
+        _FULL_S18 = tifffile.imread(S18_TIF, key=0)
+    return _FULL_DAPI, _FULL_S18
+
+
 def load_morphology(y0: int, y1: int, x0: int, x1: int):
-    """Load DAPI and 18S WSI crops for the given pixel bbox. Returns uint16."""
-    with tifffile.TiffFile(DAPI_TIF) as tf:
-        dapi = tf.series[0].asarray(key=0)[y0:y1, x0:x1].copy()
-    with tifffile.TiffFile(S18_TIF) as tf:
-        s18 = tf.series[0].asarray(key=0)[y0:y1, x0:x1].copy()
-    return dapi.astype(np.uint16), s18.astype(np.uint16)
+    """Load DAPI and 18S WSI crops for the given pixel bbox. Returns uint16.
+
+    Uses the module-level full-WSI cache so that batch runs amortise the
+    ~3.4 GB of I/O. Single-ROI use also works — the cache is lazy.
+    """
+    full_dapi, full_s18 = _load_full_wsi_pages()
+    dapi = full_dapi[y0:y1, x0:x1].copy().astype(np.uint16)
+    s18  = full_s18[y0:y1, x0:x1].copy().astype(np.uint16)
+    return dapi, s18
 
 
 # ── 2) Gene → lineage label (V0: fixed input) ───────────────────────────────
