@@ -40,3 +40,18 @@ data/**/ROI*/cpsam_roundtrip/
 
 # Keep data/README.md tracked
 !data/README.md
+
+# V0 batch outputs (regenerable, large)
+pipelines/V0/out/
+
+# Don't re-track folders we've removed
+figs/
+reports/
+refs/
+
+# Heavy WSI artefacts (regenerable from morphology + transcripts)
+data/**/cpsam_whole_slide/
+data/**/method_F_global_wsi/
+
+# Editor scratch
+.claude/scheduled_tasks.lock
