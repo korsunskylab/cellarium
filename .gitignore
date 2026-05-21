@@ -38,6 +38,41 @@ data/**/gene_labels_*.parquet
 data/**/ROI*/boundary_prior/
 data/**/ROI*/cpsam_roundtrip/
 
+# Full, non-subsetted datasets — NEVER track these (GitHub 100 MB/file limit)
+data/ITN_PAUSE/
+data/MERSCOPE_*/
+
+# Catch-all blocks for raw/multi-MB Xenium-shaped files that slip past
+# directory rules above. The per-ROI cached crops are re-whitelisted below.
+data/**/*.ome.tif
+data/**/*.h5
+data/**/*.mtx
+data/**/*.mtx.gz
+data/**/cell_boundaries.csv*
+data/**/nucleus_boundaries.csv*
+data/**/transcripts.csv*
+data/**/detected_transcripts.csv*
+data/**/mosaic_*.tif
+data/**/gene_panel.json
+data/**/cell_feature_matrix*
+data/**/cells.zarr*
+data/**/analysis*.zarr*
+
+# Whitelist the per-ROI cached crops (subsetted, all < 5 MB)
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/ROI*/morphology_*.tif
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/ROI*/transcripts.parquet
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/ROI*/cells_labeled.parquet
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/ROI*/cells_10x_*.tif
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/ROI*/cells_10x_*.parquet
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/benchmark_doublets.parquet
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/benchmark_doublet_rois/*/morphology_*.tif
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/benchmark_doublet_rois/*/transcripts.parquet
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/benchmark_doublet_rois/*/cells_*.tif
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/benchmark_doublet_rois/*/cells_*.parquet
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/gene_labels_lineage.parquet
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/gene_celltype_*.parquet
+!data/Xenium_Prime_Human_Skin_FFPE_xe_outs/cells_doublet_composition*.parquet
+
 # Keep data/README.md tracked
 !data/README.md
 
