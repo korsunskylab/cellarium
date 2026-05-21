@@ -13,7 +13,9 @@ Reads:  <in_dir>/dapi.tif        uint16  [0, 65535]  (normalized DAPI)
 Writes: <out_dir>/masks.tif      uint16  label image (0 = background, 1..N = cells)
         <out_dir>/cellprob.tif   uint16  scaled (see scaling.json)
         <out_dir>/flow_mag.tif   uint16  scaled (see scaling.json)
-        <out_dir>/scaling.json   per-array min/max/scale/offset for cellprob & flow_mag
+        <out_dir>/flow_dy.tif    uint16  scaled — y-component of dP
+        <out_dir>/flow_dx.tif    uint16  scaled — x-component of dP
+        <out_dir>/scaling.json   per-array min/max/scale/offset for all float arrays
 
 Why uint16 + sidecar JSON: R's `tiff` package can only read integer TIFFs reliably
 in this conda env (no float32 support), so float arrays (cellprob = log-odds with
@@ -76,7 +78,9 @@ def main(in_dir: Path, out_dir: Path) -> None:
     print(f"cpsam: {n_cells} cells in {time.time() - t0:.1f}s")
 
     cellprob = flows[2].astype(np.float32)
-    flow_yx  = flows[1]
+    flow_yx  = flows[1].astype(np.float32)             # (2, H, W) — [dy, dx]
+    flow_dy  = flow_yx[0]
+    flow_dx  = flow_yx[1]
     flow_mag = np.linalg.norm(flow_yx, axis=0).astype(np.float32)
 
     if n_cells >= 65535:
@@ -88,6 +92,8 @@ def main(in_dir: Path, out_dir: Path) -> None:
         "n_cells":  n_cells,
         "cellprob": save_scaled_uint16(cellprob, out_dir / "cellprob.tif"),
         "flow_mag": save_scaled_uint16(flow_mag, out_dir / "flow_mag.tif"),
+        "flow_dy":  save_scaled_uint16(flow_dy,  out_dir / "flow_dy.tif"),
+        "flow_dx":  save_scaled_uint16(flow_dx,  out_dir / "flow_dx.tif"),
         "config": {
             "cellprob_threshold": -5.0,
             "flow_threshold":      0.0,
@@ -98,7 +104,7 @@ def main(in_dir: Path, out_dir: Path) -> None:
     with open(out_dir / "scaling.json", "w") as f:
         json.dump(scaling, f, indent=2)
 
-    print(f"wrote: masks.tif (n={n_cells}), cellprob.tif, flow_mag.tif, scaling.json")
+    print(f"wrote: masks.tif (n={n_cells}), cellprob.tif, flow_mag.tif, flow_dy.tif, flow_dx.tif, scaling.json")
 
 
 if __name__ == "__main__":

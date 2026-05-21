@@ -24,6 +24,9 @@ ROIS = {
     "ROI4": dict(x0_um=1500.0, x1_um=1750.0, y0_um=2250.0, y1_um=2500.0),  # C3: dense mixed cellular
     "ROI5": dict(x0_um=6750.0, x1_um=7000.0, y0_um=3000.0, y1_um=3250.0),  # C4: dense round (epithelial/tumor)
     "ROI6": dict(x0_um=1250.0, x1_um=1500.0, y0_um=3500.0, y1_um=3750.0),  # C6: striated, 58% assignment
+    # 2026-05-13 — doublet-rich ROI from notebook 01 scan; picked for 15 Keratinocyte × Myeloid
+    # doublets (epithelial × immune, the heterotypic mix pipelines/MVP0 needs).
+    "ROI_new_1": dict(x0_um=750.0, x1_um=1000.0, y0_um=4000.0, y1_um=4250.0),
 }
 
 CHANNEL_FILES = [DATA / "morphology_focus" / f"morphology_focus_{i:04d}.ome.tif" for i in range(4)]
@@ -58,6 +61,12 @@ def main():
     for roi_name, bbox in ROIS.items():
         print(f"\n=== {roi_name} ===  x[{bbox['x0_um']}, {bbox['x1_um']}] y[{bbox['y0_um']}, {bbox['y1_um']}]")
         out_dir = DATA / roi_name
+        # Skip if already cropped (all four artifacts present)
+        required = ["morphology_DAPI.tif", "morphology_18S.tif",
+                    "cells_10x_masks.tif", "transcripts.parquet", "metadata.json"]
+        if out_dir.exists() and all((out_dir / f).exists() for f in required):
+            print(f"  → already cropped, skipping")
+            continue
         out_dir.mkdir(exist_ok=True)
 
         x0_px = int(round(bbox["x0_um"] / PIXEL_SIZE))
