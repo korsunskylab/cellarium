@@ -4,32 +4,116 @@
 
 findings:
 
-  - id: FIND-001                          # Sequential, never reused
-    created: YYYY-MM-DD
-    status: open                          # open | addressed | superseded
-    source: sandbox/notebook_name.ipynb   # notebook that produced this finding
+  - id: FIND-001
+    created: 2026-05-22
+    status: open
+    source: sandbox/V0_1_18S_coloring.ipynb
 
     conclusion: >
-      One or two sentences stating what you now believe.
+      Anisotropic diffusion of anchor density with linear-conductance from raw
+      18S (σ_eff = 2 µm), followed by Dirichlet posterior with α=10 and grey-abstain
+      at N_min=3, is the production recipe for transcript → per-pixel lineage
+      posteriors on Xenium FFPE skin.
 
     evidence: >
-      What experiment or data supported this. Which datasets, what parameters
-      were tested, what the outputs showed.
+      Tested on the 68-doublet dev set with DB_top100_031 (Fib × Mel) as primary
+      walkthrough. Stage 3b sweep compared isotropic Gaussian KDE vs. anisotropic
+      diffusion at σ ∈ {0.5, 1, 2, 4} µm; isotropic leaked across dim-18S
+      inter-cell gaps, anisotropic did not. α sweep ∈ {0.5, 1, 5, 10, 20}:
+      argmax flicker visible at α<5, absent at α≥5. Punctate-points artifact at
+      naive n_iter = σ²/dt fixed by ANISO_N_ITER_FACTOR=4 (calibrated for typical
+      cell-interior c²≈0.25). σ_diffuse=2 µm matches cytoplasmic mRNA spread in
+      Xenium FFPE.
 
     reasoning: >
-      Why the conclusion follows from the evidence. What alternative
-      explanations were ruled out and why.
+      Anisotropic diffusion uses per-edge conductance c(p)·c(q) where c is a
+      1–99 percentile clip of raw 18S — diffusion is blocked at dim cytoplasm
+      gaps, so anchor density respects cell-membrane morphology. Isotropic
+      Gaussian KDE bleeds across these gaps and confounds neighboring cells.
+      α controls how strongly the Dirichlet prior pulls π toward uniform; at low
+      α a 1-2 anchor blip dominates locally, visible as argmax islands. N_min=3
+      is the floor below which we explicitly grey-abstain rather than commit a
+      lineage call. The 4× n_iter factor compensates for cell-interior conductance
+      being c²≈0.25, not 1, so effective σ would otherwise be half the target.
 
     scope:
-      applies_to: [Xenium, MERSCOPE]       # platforms this holds for
-      tissue_types: [skin, PBMC]           # tissue types tested
-      resolution_um_per_px: 0.2125         # imaging resolution used
+      applies_to: [Xenium]
+      tissue_types: [skin]
+      resolution_um_per_px: 0.2125
       known_exceptions: >
-        Describe any cases where this finding does not apply.
+        Not tested in low-anchor-density tissue (immune-poor stroma, fibrotic
+        regions) or for lineage pairs outside Fib/Mel/Myeloid/Tcell/Plasma/Endo/Kerat.
+        PBMC and MERSCOPE not tested. The conductance calibration assumes
+        Xenium FFPE 18S brightness range; very different staining conditions
+        likely require recalibrating ANISO_TYPICAL_C2.
 
     affects:
-      pipeline: []                         # e.g. [pipelines/V0/00_run_pipeline.ipynb]
-      analyses: []                         # e.g. [analyses/01_celltype_ground_truth.ipynb]
+      pipeline:
+        - pipelines/V0/lib.py
+        - pipelines/V0/00_run_pipeline.ipynb
+        - pipelines/V0/01_batch_dev_doublets.ipynb
+      analyses: []
 
-    action_taken: null                     # describe what was done, or null
-    superseded_by: null                    # FIND-XXX if a later finding overrides this
+    action_taken: null
+    superseded_by: null
+
+
+  - id: FIND-002
+    created: 2026-05-22
+    status: open
+    source: sandbox/V0_2_boundary_estimation.ipynb
+
+    conclusion: >
+      The tanh-gradient continuous edge field thresholded at p99 (K_sharp=8,
+      gated by confidence² · cell_evidence) is the production boundary detector
+      on V0 posteriors. Argmax-based discrete detectors with a confidence>0.5
+      gate are an acceptable fallback. Point-wise scalars of the posterior
+      (margin, uncertainty 1−π_top1, entropy H(π)) do NOT work as boundary
+      detectors and should not be re-added.
+
+    evidence: >
+      Tested 7 boundary detectors on DB_top100_031 and a 6-doublet zoom panel
+      (026, 018, 015, 090, 082), plus the 68-doublet batch sweep. The three
+      point-wise detectors (margin<0.10, (1−π_top1)>0.6, entropy>1.5) fired
+      across the whole frame without spatial coherence — visible as speckle
+      that did not trace lineage transitions, even on doublets where the
+      gradient detector found clean boundaries. Argmax-raw fired on
+      ~1-transcript noise pixels. Argmax & confidence>0.5 suppressed phantom
+      stroma boundaries acceptably. tanh-gradient@p99 produced coherent
+      boundaries inside dense-anchor regions on all 6 zoom-panel doublets.
+      Method 8 (DiZenzo structure tensor) and the three point-wise detectors
+      were culled 2026-05-22.
+
+    reasoning: >
+      Boundaries are inherently spatial-gradient objects — they are defined by
+      where the lineage call CHANGES, not by where the lineage call is
+      uncertain. Point-wise scalars (margin, uncertainty, entropy) measure
+      pointwise ambiguity but carry no spatial-gradient information; high
+      ambiguity at a single pixel is uninformative about whether a boundary
+      passes through it. The tanh-gradient detector computes |∇ tanh(K · s_k)|
+      per lineage where s_k is the signed margin; K_sharp=8 saturates s_k at ±1
+      so the gradient peaks exactly at the sign-change line. The c² gate
+      suppresses low-anchor stroma; cell_evidence suppresses inter-cell gaps.
+      p99 percentile threshold is robust to the absolute magnitude of
+      weighted_edge (which depends on K_sharp and anchor density).
+
+    scope:
+      applies_to: [Xenium]
+      tissue_types: [skin]
+      resolution_um_per_px: 0.2125
+      known_exceptions: >
+        Dev set was the top-100 brightest doublets; behaviour in dim-18S regions
+        where N_total is much lower not characterised. Lineage pairs tested:
+        Fib×Mel (031, 026, 018, 015, 090) and Fib×Plasma (082). Plasma×Endo,
+        Kerat×Mel, and other less-frequent pairs not tested.
+
+    affects:
+      pipeline:
+        - pipelines/V0/lib.py
+        - pipelines/V0/00_run_pipeline.ipynb
+      analyses: []
+
+    depends_on: [FIND-001]
+
+    action_taken: null
+    superseded_by: null
