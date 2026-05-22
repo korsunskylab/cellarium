@@ -1,35 +1,38 @@
 # cellarium
 
-Improving cell segmentation on Xenium spatial transcriptomics by augmenting the morphology image with a transcript-derived **boundary-likelihood prior** before running CP-SAM (cellpose 4). The hypothesis: where mRNA gradients indicate a cell-type transition, dim the 18S morphology channel along that line so CP-SAM is more likely to split heterotypic neighbors that would otherwise be merged.
+Improving cell segmentation on Xenium spatial transcriptomics by augmenting the morphology image with a transcript-derived **boundary-likelihood prior** before running Cellpose-SAM. The hypothesis: where mRNA gradients indicate a cell-type transition, dim the 18S morphology channel along that line so CP-SAM is more likely to split heterotypic neighbors that would otherwise be merged.
 
-The repo is organized into three tiers of notebooks plus supporting scripts:
+## Repository layout
 
 ```
 cellarium/
-├── workflow/   # canonical pipeline — run these in order to reproduce results
-├── tools/      # parameterized utilities for exploring a new dataset
-├── sandbox/    # archived one-off experiments that informed pipeline decisions
-├── scripts/    # preprocessing + runtime helpers invoked by the notebooks
-├── .claude/    # nbformat builders for the notebooks (Claude scaffolding; not user-facing)
-├── data/       # Xenium output + per-ROI crops + derived outputs (mostly gitignored)
-└── figs/       # standalone diagnostic figures
+├── analyses/                  # notebooks grounded in a specific dataset, each producing a data product
+├── sandbox/                   # exploratory iteration space — new ideas, dead-end documentation
+├── pipelines/                 # production-ready code
+│   └── V0/                    # active pipeline: boundary-prior + CP-SAM
+├── data/                      # Xenium output + per-ROI crops (mostly gitignored)
+├── documentation/             # methods write-ups
+├── scratch/                   # dev figures and intermediates (gitignored)
+├── .claude/                   # AI tooling: notebook builders + role definitions
+│
+├── CLAUDE.md                  # workflow conventions for the AI assistant
+├── FIGURE_STANDARDS.md        # figure conventions
+├── findings_registry.yaml     # durable findings affecting downstream notebooks
+└── README.md                  # this file
 ```
 
-Each subfolder has its own README. Start with `workflow/README.md` to reproduce the pipeline; `tools/README.md` to explore a new dataset; `sandbox/README.md` to understand why we made specific design decisions.
+Each tier (`analyses/`, `sandbox/`, `pipelines/`) has a `CLAUDE.md` with tier-specific conventions.
 
-## Top-level pipeline narrative
+## Where to start
 
-1. **`workflow/01_celltype_ground_truth.ipynb`** (R) — Ingest the full 10X-segmented cells (~112k), QC, cluster via Seurat + Harmony, annotate clusters into 15 fine + 7 lineage cell-type labels, build a gene × cell-type count matrix, and emit per-gene lineage labels (one of the 7 types or "ambiguous").
-2. **`workflow/02_mrna_gradients.ipynb`** (R) — Per-transcript embedding from the count matrix in (1), filtered by labels, processed via Tessera (mesh + gradient + smoothing) to produce a per-transcript boundary score. Exports `boundary_likelihood.tif` at morphology resolution for the Python pipeline.
-3. **`workflow/03_gap_intervention_test.ipynb`** (Python) — Step-0 validation that a Gaussian dim cut on 18S forces CP-SAM to split a merged doublet. Operating window mapped on synthetic + real ROI data.
+- **Working with the AI assistant** — read `CLAUDE.md` first; it has the workflow.
+- **Active pipeline development** — `pipelines/V0/`. The boundary-prior V0 module is a self-contained folder with `lib.py`, numbered entry-point notebooks, and diagnostic scripts. New pipeline versions follow this pattern.
+- **Final analyses on specific datasets** — `analyses/`. Each notebook documents its dataset, output product, and any `findings_registry.yaml` entries it implements.
+- **Trying a new idea** — `sandbox/`. Topic-named notebooks; scripts grouped into conceptual subfolders.
 
-The integration step (apply boundary mask from notebook 02 to the 18S channel + re-run CP-SAM) is set up at the end of notebook 02 (`§7 cpsam_roundtrip`).
+## Recommended Cellpose-SAM settings
 
-`sandbox/label_smoothing_methods.ipynb` compares method options (naive pooling vs anchored label propagation vs Potts MRF) on synthetic data. Findings will inform notebook 02 once integrated.
-
-## Recommended CP-SAM settings
-
-For Xenium 5K tissue work in this pipeline, the validated **max-recall** config gives ~93% transcript-to-cell assignment vs ~75% for 10X defaults across 6 ROIs of the Human Skin Melanoma slide:
+For Xenium 5K tissue work in this pipeline, the validated **max-recall** config gives ~93% transcript-to-cell assignment vs ~75% for 10X defaults, across 6 ROIs of the Human Skin Melanoma slide:
 
 ```python
 from cellpose import models
@@ -44,25 +47,25 @@ masks, flows, _ = m.eval(
 )
 ```
 
-The bias is intentional toward over-segmentation: false positives are filterable downstream by Baysor's transcript voting, false negatives are not.
+The bias is intentional toward over-segmentation: false positives are filterable downstream by Baysor's transcript voting; false negatives are not.
 
 ## Environment
 
-Python (cpsam, cellpose-omni, omnipose) — used by Python notebooks + by `scripts/run_cpsam_on_dir.py`:
+Python (Cellpose 4 + cellpose-omni). Used by all Python notebooks and pipeline scripts:
 
 ```bash
 mamba create -n omnipose python=3.11 pip -y
 mamba activate omnipose
-pip install cellpose==4.1.1 omnipose==0.4.4 jupyterlab tifffile zarr pandas pyarrow pooch plotly anywidget
+pip install cellpose==4.1.1 cellpose-omni==0.9.1 jupyterlab tifffile zarr pandas pyarrow pooch plotly anywidget
 python -m ipykernel install --user --name omnipose --display-name "Python (omnipose)"
 ```
 
-R env (Seurat 5, harmony, presto, tessera, arrow, tiff) — used by all R workflow notebooks. R kernel registered with Jupyter (`IRkernel::installspec()`) so .ipynb files with `kernelspec.name = "ir"` open with the R kernel.
+R (Seurat 5, harmony, presto, tessera, arrow, tiff). Used by R analysis notebooks. Register the kernel with `IRkernel::installspec()` so `.ipynb` files with `kernelspec.name = "ir"` open with the R kernel.
 
 ## Regenerating ROIs from source
 
 If you have the original Xenium output bundle locally:
 
 ```bash
-python scripts/crop_xenium_rois.py     # writes ROI1..ROI6 to data/<dataset>/ROI*/
+python analyses/scripts/crop_xenium_rois.py     # writes ROI1..ROI6 to data/<dataset>/ROI*/
 ```

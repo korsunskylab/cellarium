@@ -1,0 +1,35 @@
+# Findings registry
+# Add an entry when a sandbox finding changes what at least one downstream notebook should do.
+# Invoke the Knowledge Cartographer to propose entries — do not write them manually.
+
+findings:
+
+  - id: FIND-001                          # Sequential, never reused
+    created: YYYY-MM-DD
+    status: open                          # open | addressed | superseded
+    source: sandbox/notebook_name.ipynb   # notebook that produced this finding
+
+    conclusion: >
+      One or two sentences stating what you now believe.
+
+    evidence: >
+      What experiment or data supported this. Which datasets, what parameters
+      were tested, what the outputs showed.
+
+    reasoning: >
+      Why the conclusion follows from the evidence. What alternative
+      explanations were ruled out and why.
+
+    scope:
+      applies_to: [Xenium, MERSCOPE]       # platforms this holds for
+      tissue_types: [skin, PBMC]           # tissue types tested
+      resolution_um_per_px: 0.2125         # imaging resolution used
+      known_exceptions: >
+        Describe any cases where this finding does not apply.
+
+    affects:
+      pipeline: []                         # e.g. [pipelines/V0/00_run_pipeline.ipynb]
+      analyses: []                         # e.g. [analyses/01_celltype_ground_truth.ipynb]
+
+    action_taken: null                     # describe what was done, or null
+    superseded_by: null                    # FIND-XXX if a later finding overrides this

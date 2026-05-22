@@ -79,6 +79,10 @@ data/**/analysis*.zarr*
 # V0 batch outputs (regenerable, large)
 pipelines/V0/out/
 
+# Working scratch space — dev figures, intermediate dumps. Default save target
+# for the Scientist per FIGURE_STANDARDS.md. Everything here is regenerable.
+scratch/
+
 # Don't re-track folders we've removed
 figs/
 reports/
