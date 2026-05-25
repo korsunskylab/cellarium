@@ -47,11 +47,25 @@ findings:
         Xenium FFPE 18S brightness range; very different staining conditions
         likely require recalibrating ANISO_TYPICAL_C2.
 
+        PRODUCTION-VS-SANDBOX GAP (as of 2026-05-24): lib.py defines both
+        lineage_posterior_anisotropic (this recipe) and the older isotropic
+        lineage_posterior. The production notebooks (00_run_pipeline.ipynb,
+        01_batch_dev_doublets.ipynb) and all 5 diagnostic _*.py scripts in
+        pipelines/V0/ currently still call lib.lineage_posterior (isotropic).
+        Only sandbox notebooks (V0_1, V0_2, V0_3, edge_detection_diagnostics)
+        exercise the anisotropic recipe. Migration to anisotropic in the
+        production tier is pending.
+
     affects:
       pipeline:
         - pipelines/V0/lib.py
-        - pipelines/V0/00_run_pipeline.ipynb
-        - pipelines/V0/01_batch_dev_doublets.ipynb
+        - pipelines/V0/00_run_pipeline.ipynb           # MIGRATION PENDING (uses isotropic)
+        - pipelines/V0/01_batch_dev_doublets.ipynb     # MIGRATION PENDING (uses isotropic)
+        - pipelines/V0/_audit_assumptions.py           # MIGRATION PENDING (uses isotropic)
+        - pipelines/V0/_depth_histogram.py             # MIGRATION PENDING (uses isotropic)
+        - pipelines/V0/_diagnose_cell_018.py           # MIGRATION PENDING (uses isotropic)
+        - pipelines/V0/_normalization_variants.py      # MIGRATION PENDING (uses isotropic)
+        - pipelines/V0/_sanity_binary_cut.py           # MIGRATION PENDING (uses isotropic)
       analyses: []
 
     action_taken: null
@@ -114,6 +128,68 @@ findings:
       analyses: []
 
     depends_on: [FIND-001]
+
+    action_taken: null
+    superseded_by: null
+
+
+  - id: FIND-003
+    created: 2026-05-24
+    status: open
+    source: sandbox/V0_2_boundary_estimation.ipynb
+
+    conclusion: >
+      Per-lineage edge field should be e_k = ‖∇ max(t_k, 0)‖, not
+      ‖∇ tanh(K_sharp · s_k)‖. Clipping t_k to [0, 1] before the gradient
+      restricts e_k to fire only at the perimeter of regions where lineage k
+      is winning; the original formulation also fires on transitions between
+      two non-k-winning regions, which is conceptually wrong and empirically
+      noisy.
+
+    evidence: >
+      Diagnostics on DB_top100_031 (Fib × Mel), 2026-05-24
+      (see scratch/figures/xenium_skin_db031_bug1-fix_relu-clip_K-sharp8.png
+      and xenium_skin_db031_e-fib-bugs_anisotropic-sigma2_K-sharp8.png).
+      Spurious-pixel test: at (y=195, x=243), no Fib anchor within 20 px
+      (distance 4.3 µm), t_Fib = −0.88 (Fib clearly losing). Original
+      e_Fib = 4.45; clipped e_Fib = 0.00. Aggregate: 66% of previously
+      bright pixels (e_Fib > 0.5) drop to exactly 0 under the clip. Among
+      the surviving 8,174 bright clipped pixels, every single one has a
+      positive t_Fib neighbour within a 3×3 window (zero false positives
+      verified). Real focal-cell Fib boundary preserved
+      (e_Fib max in focal: 3.66 → 2.94). Off/focal ratio improved on
+      edge_total (4.17× → 2.82×) and on weighted_edge (5.41× → 4.18×).
+
+    reasoning: >
+      With K_sharp = 8, tanh(K · s_k) is near a step function at s_k = 0.
+      Its Sobel gradient fires strongly across any zero-crossing — including
+      transitions where s_k flips from "slightly losing" to "strongly losing"
+      (lineage k never wins on either side). The clip max(t_k, 0) is
+      identically zero wherever t_k ≤ 0, so its gradient vanishes outside
+      k-winning territory. Conceptually: a "lineage k boundary" is the
+      perimeter of the region where k wins, and that is exactly what
+      ‖∇ max(t_k, 0)‖ traces.
+
+    scope:
+      applies_to: [Xenium]
+      tissue_types: [skin]
+      resolution_um_per_px: 0.2125
+      known_exceptions: >
+        Only verified on DB_top100_031; needs confirmation on the broader
+        6-doublet zoom panel (026, 018, 015, 090, 082) and the 68-doublet
+        batch before being treated as universally validated. The fix does
+        NOT resolve off-focal-dominance (Mel cell-perimeter edges still
+        dominate the global p99 — n_bnd_in_focal still 0 on this doublet),
+        and does NOT address the anisotropic-diffusion rescaling issue
+        (Bug 2; tabled this session).
+
+    affects:
+      pipeline:
+        - pipelines/V0/lib.py
+        - pipelines/V0/00_run_pipeline.ipynb
+      analyses: []
+
+    depends_on: [FIND-002]
 
     action_taken: null
     superseded_by: null
